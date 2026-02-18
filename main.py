@@ -21,6 +21,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Créer les tables au démarrage
+from app.database import Base, engine
+from app.models import User, Club, Match, Player
+
+@app.on_event("startup")
+async def startup_event():
+    Base.metadata.create_all(bind=engine)
+    print("✅ Database tables created")
+
 @app.get("/")
 async def root():
     return {
