@@ -6,7 +6,7 @@ class PlayerBase(BaseModel):
     name: str
     number: int
     position: str
-    category: str = "N3"
+    category: Optional[str] = "N3"
     photo_url: Optional[str] = None
     birth_date: Optional[datetime] = None
     height: Optional[float] = None
@@ -28,9 +28,9 @@ class PlayerUpdate(BaseModel):
 
 class PlayerResponse(PlayerBase):
     id: str
-    club_id: str
-    status: str
-    created_at: datetime
+    club_id: Optional[str] = None
+    status: Optional[str] = "actif"
+    created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     
     class Config:
