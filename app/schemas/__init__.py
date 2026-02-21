@@ -37,28 +37,36 @@ class MatchCreate(BaseModel):
     opponent: str
     date: datetime
     category: str
-    type: MatchType
-    video_url: str
+    type: Optional[MatchType] = None
+    video_url: Optional[str] = None
 
 class MatchUpdate(BaseModel):
     opponent: Optional[str] = None
     date: Optional[datetime] = None
     category: Optional[str] = None
     type: Optional[MatchType] = None
+    score_home: Optional[int] = None
+    score_away: Optional[int] = None
+    competition: Optional[str] = None
+    location: Optional[str] = None
 
 class MatchResponse(BaseModel):
     id: str
     opponent: str
     date: datetime
-    category: str
-    type: str
+    category: Optional[str] = None
+    type: Optional[str] = None
     status: str
-    progress: int
-    video_url: str
-    pdf_url: Optional[str]
-    stats: Optional[Dict[str, Any]]
-    uploaded_at: datetime
-    processed_at: Optional[datetime]
+    progress: Optional[int] = 0
+    video_url: Optional[str] = None
+    pdf_url: Optional[str] = None
+    stats: Optional[Dict[str, Any]] = None
+    score_home: Optional[int] = None
+    score_away: Optional[int] = None
+    competition: Optional[str] = None
+    location: Optional[str] = None
+    uploaded_at: Optional[datetime] = None
+    processed_at: Optional[datetime] = None
     
     class Config:
         from_attributes = True
