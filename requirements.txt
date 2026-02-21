@@ -18,3 +18,4 @@ httpx==0.26.0
 psycopg2-binary
 email-validator==2.1.0
 argon2-cffi==23.1.0
+resend==2.22.0

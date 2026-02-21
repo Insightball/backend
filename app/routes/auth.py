@@ -2,6 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from datetime import timedelta
 import uuid
+import resend
+import os
 
 from app.database import get_db
 from app.models import User, Club, PlanType
@@ -11,6 +13,58 @@ from app.dependencies import get_current_user
 from app.config import settings
 
 router = APIRouter()
+
+# Resend setup
+resend.api_key = os.getenv("RESEND_API_KEY")
+
+
+def send_welcome_email(user_name: str, user_email: str, plan: str):
+    """Envoie un email de bienvenue après inscription"""
+    try:
+        plan_label = "Coach" if plan == "coach" else "Club"
+        resend.Emails.send({
+            "from": "INSIGHTBALL <onboarding@resend.dev>",
+            "to": user_email,
+            "subject": "Bienvenue sur INSIGHTBALL 🎉",
+            "html": f"""
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #0f1117; color: #e2e8f0; padding: 40px; border-radius: 12px;">
+                <div style="text-align: center; margin-bottom: 32px;">
+                    <h1 style="color: #6366f1; font-size: 28px; margin: 0;">⚽ INSIGHTBALL</h1>
+                </div>
+                
+                <h2 style="font-size: 22px; margin-bottom: 8px;">Bienvenue, {user_name} ! 👋</h2>
+                <p style="color: #94a3b8; line-height: 1.6;">
+                    Ton compte <strong style="color: #e2e8f0;">Plan {plan_label}</strong> est prêt. 
+                    Tu peux dès maintenant analyser tes matchs, suivre tes joueurs et améliorer les performances de ton équipe.
+                </p>
+
+                <div style="background: #1a1d27; border: 1px solid #2d3148; border-radius: 8px; padding: 24px; margin: 24px 0;">
+                    <h3 style="margin: 0 0 12px 0; color: #818cf8;">Ce que tu peux faire :</h3>
+                    <ul style="color: #94a3b8; line-height: 2; padding-left: 20px; margin: 0;">
+                        <li>📹 Uploader et analyser tes matchs</li>
+                        <li>👥 Gérer tes joueurs et leur stats</li>
+                        <li>📊 Visualiser les performances</li>
+                        <li>🗺️ Créer des compositions tactiques</li>
+                    </ul>
+                </div>
+
+                <div style="text-align: center; margin-top: 32px;">
+                    <a href="https://insightballdemo.netlify.app/dashboard" 
+                       style="background: #6366f1; color: white; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-weight: bold; font-size: 16px;">
+                        Accéder à mon dashboard →
+                    </a>
+                </div>
+
+                <p style="color: #475569; font-size: 12px; text-align: center; margin-top: 32px;">
+                    Une question ? Réponds à cet email ou contacte-nous à contact@insightball.com
+                </p>
+            </div>
+            """
+        })
+    except Exception as e:
+        # Ne pas bloquer l'inscription si l'email échoue
+        print(f"⚠️ Email de bienvenue non envoyé : {e}")
+
 
 @router.post("/signup", response_model=Token)
 async def signup(user_data: UserSignup, db: Session = Depends(get_db)):
@@ -39,7 +93,7 @@ async def signup(user_data: UserSignup, db: Session = Depends(get_db)):
             quota_matches=10
         )
         db.add(club)
-        db.flush()  # Get the club.id
+        db.flush()
     
     # Create user
     user = User(
@@ -55,6 +109,9 @@ async def signup(user_data: UserSignup, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(user)
     
+    # Envoyer email de bienvenue
+    send_welcome_email(user.name, user.email, user.plan.value)
+    
     # Create access token
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
@@ -64,11 +121,11 @@ async def signup(user_data: UserSignup, db: Session = Depends(get_db)):
     
     return {"access_token": access_token, "token_type": "bearer"}
 
+
 @router.post("/login", response_model=Token)
 async def login(credentials: UserLogin, db: Session = Depends(get_db)):
     """Authenticate user and return JWT token"""
     
-    # Find user
     user = db.query(User).filter(User.email == credentials.email).first()
     
     if not user or not verify_password(credentials.password, user.hashed_password):
@@ -84,7 +141,11 @@ async def login(credentials: UserLogin, db: Session = Depends(get_db)):
             detail="Inactive user"
         )
     
-    # Create access token
+    # Update last_login
+    from datetime import datetime
+    user.last_login = datetime.utcnow()
+    db.commit()
+
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
         data={"sub": user.email}, 
@@ -92,6 +153,7 @@ async def login(credentials: UserLogin, db: Session = Depends(get_db)):
     )
     
     return {"access_token": access_token, "token_type": "bearer"}
+
 
 @router.get("/me", response_model=UserResponse)
 async def get_current_user_info(
@@ -106,7 +168,6 @@ async def get_current_user_info(
         plan=current_user.plan.value
     )
     
-    # Add club name if user is in a club
     if current_user.club:
         response.club_name = current_user.club.name
     
