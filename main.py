@@ -23,7 +23,7 @@ app.add_middleware(
 
 # Créer les tables au démarrage
 from app.database import Base, engine
-from app.models import User, Club, Match, Player
+from app.models import User, Club, Match, Player, Notification
 
 @app.on_event("startup")
 async def startup_event():
@@ -45,13 +45,15 @@ async def health_check():
     }
 
 # Import routes APRÈS le middleware
-from app.routes import auth, matches, upload, players, clubs
+from app.routes import auth, matches, upload, players, clubs, notifications, subscription
 
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(matches.router, prefix="/api/matches", tags=["matches"])
 app.include_router(upload.router, prefix="/api/upload", tags=["upload"])
 app.include_router(players.router, prefix="/api/players", tags=["players"])
 app.include_router(clubs.router, prefix="/api/clubs", tags=["clubs"])
+app.include_router(notifications.router, prefix="/api/notifications", tags=["notifications"])
+app.include_router(subscription.router, prefix="/api/subscription", tags=["subscription"])
 
 if __name__ == "__main__":
     import uvicorn

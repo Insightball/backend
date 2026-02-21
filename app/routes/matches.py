@@ -24,7 +24,6 @@ async def create_match(
     
     match = Match(
         id=str(uuid.uuid4()),
-        user_id=current_user.id,
         club_id=current_user.club_id,
         opponent=match_data.opponent,
         date=match_data.date,
@@ -54,7 +53,7 @@ async def get_matches(
 ):
     """Get all matches for current user"""
     
-    query = db.query(Match).filter(Match.user_id == current_user.id)
+    query = db.query(Match).filter(Match.club_id == current_user.club_id)
     
     # Apply filters
     if category:
@@ -77,7 +76,7 @@ async def get_match(
     
     match = db.query(Match).filter(
         Match.id == match_id,
-        Match.user_id == current_user.id
+        Match.club_id == current_user.club_id
     ).first()
     
     if not match:
@@ -99,7 +98,7 @@ async def update_match(
     
     match = db.query(Match).filter(
         Match.id == match_id,
-        Match.user_id == current_user.id
+        Match.club_id == current_user.club_id
     ).first()
     
     if not match:
@@ -128,7 +127,7 @@ async def delete_match(
     
     match = db.query(Match).filter(
         Match.id == match_id,
-        Match.user_id == current_user.id
+        Match.club_id == current_user.club_id
     ).first()
     
     if not match:

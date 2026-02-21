@@ -1,17 +1,19 @@
 from pydantic import BaseModel
 from typing import Optional
-from datetime import date, datetime
+from datetime import datetime
 
-# Player Schemas
-class PlayerCreate(BaseModel):
+class PlayerBase(BaseModel):
     name: str
     number: int
-    position: str  # "Gardien", "Défenseur", "Milieu", "Attaquant"
-    category: str  # "N3", "U19", "U17", etc.
+    position: str
+    category: str = "N3"
     photo_url: Optional[str] = None
-    birth_date: Optional[date] = None
-    height: Optional[int] = None
-    weight: Optional[int] = None
+    birth_date: Optional[datetime] = None
+    height: Optional[float] = None
+    weight: Optional[float] = None
+
+class PlayerCreate(PlayerBase):
+    pass
 
 class PlayerUpdate(BaseModel):
     name: Optional[str] = None
@@ -19,25 +21,17 @@ class PlayerUpdate(BaseModel):
     position: Optional[str] = None
     category: Optional[str] = None
     photo_url: Optional[str] = None
-    birth_date: Optional[date] = None
-    height: Optional[int] = None
-    weight: Optional[int] = None
+    birth_date: Optional[datetime] = None
+    height: Optional[float] = None
+    weight: Optional[float] = None
     status: Optional[str] = None
 
-class PlayerResponse(BaseModel):
+class PlayerResponse(PlayerBase):
     id: str
-    name: str
-    number: int
-    position: str
-    category: str
-    photo_url: Optional[str]
-    birth_date: Optional[date]
-    height: Optional[int]
-    weight: Optional[int]
+    club_id: str
     status: str
-    matches_played: int
-    minutes_played: int
     created_at: datetime
+    updated_at: Optional[datetime] = None
     
     class Config:
         from_attributes = True

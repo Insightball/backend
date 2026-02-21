@@ -5,7 +5,7 @@ import uuid
 
 from app.database import get_db
 from app.models import User
-from app.models import Player, PlayerStatus
+from app.models import Player
 from app.schemas.player import PlayerCreate, PlayerResponse, PlayerUpdate
 from app.dependencies import get_current_active_user
 
@@ -34,7 +34,6 @@ async def create_player(
     
     player = Player(
         id=str(uuid.uuid4()),
-        user_id=current_user.id,
         club_id=current_user.club_id,
         name=player_data.name,
         number=player_data.number,
@@ -44,7 +43,7 @@ async def create_player(
         birth_date=player_data.birth_date,
         height=player_data.height,
         weight=player_data.weight,
-        status=PlayerStatus.ACTIVE
+status="actif"
     )
     
     db.add(player)
