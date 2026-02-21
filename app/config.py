@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     CELERY_BROKER_URL: str
     CELERY_RESULT_BACKEND: str
     
+    # Resend
+    RESEND_API_KEY: str = ""
+    
     # CORS
     FRONTEND_URL: str = "http://localhost:3000"
     
