@@ -23,7 +23,7 @@ def send_welcome_email(user_name: str, user_email: str, plan: str):
     try:
         plan_label = "Coach" if plan == "coach" else "Club"
         resend.Emails.send({
-            "from": "INSIGHTBALL <onboarding@resend.dev>",
+            "from": "INSIGHTBALL <contact@insightball.com>",
             "to": user_email,
             "subject": "Bienvenue sur INSIGHTBALL 🎉",
             "html": f"""
