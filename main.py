@@ -2,17 +2,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
-# Load environment variables
 load_dotenv()
 
-# Create FastAPI app
 app = FastAPI(
     title="INSIGHTBALL API",
     description="API Backend pour la plateforme INSIGHTBALL",
     version="1.0.0"
 )
 
-# CORS Configuration - AVANT les routes
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -21,7 +18,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Créer les tables au démarrage
 from app.database import Base, engine
 from app.models import User, Club, Match, Player, Notification
 
@@ -40,11 +36,9 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    return {
-        "status": "healthy"
-    }
+    return {"status": "healthy"}
 
-# Import routes APRÈS le middleware
+# Routes publiques
 from app.routes import auth, matches, upload, players, clubs, notifications, subscription
 
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
@@ -55,11 +49,10 @@ app.include_router(clubs.router, prefix="/api/clubs", tags=["clubs"])
 app.include_router(notifications.router, prefix="/api/notifications", tags=["notifications"])
 app.include_router(subscription.router, prefix="/api/subscription", tags=["subscription"])
 
+# Route admin — invisible dans /docs (include_in_schema=False)
+from app.routes import admin
+app.include_router(admin.router, prefix="/api/x-admin", include_in_schema=False)
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True
-    )
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

@@ -30,8 +30,12 @@ class User(Base):
     club_id = Column(String, ForeignKey("clubs.id"), nullable=True)
     role = Column(Enum(UserRole), default=UserRole.ADMIN)
     
+    # Superadmin (panel admin caché - indépendant du rôle club)
+    is_superadmin = Column(Boolean, default=False)
+    
     # Metadata
     is_active = Column(Boolean, default=True)
+    last_login = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
