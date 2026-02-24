@@ -46,7 +46,7 @@ async def health_check():
     }
 
 # Import routes APRÈS le middleware
-from app.routes import auth, matches, upload, players, clubs, notifications, subscription, leads
+from app.routes import auth, matches, upload, players, clubs, notifications, subscription, leads, admin
 
 app.include_router(auth.router,          prefix="/api/auth",          tags=["auth"])
 app.include_router(matches.router,       prefix="/api/matches",       tags=["matches"])
@@ -56,6 +56,7 @@ app.include_router(clubs.router,         prefix="/api/clubs",         tags=["clu
 app.include_router(notifications.router, prefix="/api/notifications", tags=["notifications"])
 app.include_router(subscription.router,  prefix="/api/subscription",  tags=["subscription"])
 app.include_router(leads.router,         prefix="/api/leads",         tags=["leads"])
+app.include_router(admin.router,         prefix="/api/x-admin",       tags=["admin"])
 
 if __name__ == "__main__":
     import uvicorn
