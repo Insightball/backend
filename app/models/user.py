@@ -5,13 +5,13 @@ import enum
 from app.database import Base
 
 class PlanType(str, enum.Enum):
-    COACH = "coach"
-    CLUB = "club"
+    COACH = "COACH"
+    CLUB = "CLUB"
 
 class UserRole(str, enum.Enum):
-    ADMIN = "admin"
-    COACH = "coach"
-    ANALYST = "analyst"
+    ADMIN = "ADMIN"
+    COACH = "COACH"
+    ANALYST = "ANALYST"
 
 class User(Base):
     __tablename__ = "users"

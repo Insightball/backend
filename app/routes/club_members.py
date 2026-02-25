@@ -1,7 +1,3 @@
-"""
-app/routes/club_members.py
-Gestion des membres d'un club — invitations, rôles, suppressions
-"""
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
@@ -22,12 +18,11 @@ router = APIRouter()
 resend.api_key = os.getenv("RESEND_API_KEY")
 
 
-# ─── Dependencies ────────────────────────────────────────────────────────────
-
 def require_club_admin(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if not current_user.club_id:
         raise HTTPException(status_code=403, detail="Aucun club associé")
-    if current_user.role.value != "admin":
+    role_val = current_user.role.value if hasattr(current_user.role, 'value') else current_user.role
+    if role_val != "ADMIN":
         raise HTTPException(status_code=403, detail="Accès réservé aux admins du club")
     return current_user
 
@@ -36,8 +31,6 @@ def require_club_member(current_user: User = Depends(get_current_user)):
         raise HTTPException(status_code=403, detail="Aucun club associé")
     return current_user
 
-
-# ─── Schemas ─────────────────────────────────────────────────────────────────
 
 class InviteMemberRequest(BaseModel):
     email: EmailStr
@@ -58,19 +51,15 @@ class MemberResponse(BaseModel):
     accepted_at: Optional[datetime]
     user_name: Optional[str] = None
     user_id: Optional[str] = None
-
     class Config:
         from_attributes = True
 
 
-# ─── Email invitation ─────────────────────────────────────────────────────────
-
 def send_invitation_email(invitee_email: str, club_name: str, inviter_name: str, role: str, category: Optional[str], token: str):
-    role_labels = {"admin": "Administrateur", "coach": "Coach", "analyst": "Analyste"}
+    role_labels = {"ADMIN": "Administrateur", "COACH": "Coach", "ANALYST": "Analyste"}
     role_label = role_labels.get(role, role)
     category_text = f" — {category}" if category else ""
     accept_url = f"https://www.insightball.com/join?token={token}"
-
     try:
         resend.Emails.send({
             "from": "INSIGHTBALL <contact@insightball.com>",
@@ -83,8 +72,6 @@ def send_invitation_email(invitee_email: str, club_name: str, inviter_name: str,
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#0a0908;padding:40px 20px;">
     <tr><td align="center">
       <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;">
-
-        <!-- Logo -->
         <tr>
           <td style="padding:0 0 32px 0;">
             <span style="font-size:22px;font-weight:900;letter-spacing:.06em;color:#f5f2eb;font-family:monospace;">
@@ -92,31 +79,17 @@ def send_invitation_email(invitee_email: str, club_name: str, inviter_name: str,
             </span>
           </td>
         </tr>
-
-        <!-- Card -->
         <tr>
           <td style="background:#0f0e0c;border:1px solid rgba(255,255,255,0.07);border-top:2px solid #c9a227;padding:36px 32px;">
-
-            <!-- Subtitle -->
-            <p style="margin:0 0 8px 0;font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:#c9a227;font-family:monospace;">
-              Invitation reçue
-            </p>
-
-            <!-- Title -->
+            <p style="margin:0 0 8px 0;font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:#c9a227;font-family:monospace;">Invitation reçue</p>
             <h1 style="margin:0 0 20px 0;font-size:28px;text-transform:uppercase;color:#f5f2eb;font-family:monospace;letter-spacing:.03em;line-height:1.1;">
               Rejoignez<br/>{club_name}
             </h1>
-
-            <!-- Separator -->
             <div style="width:40px;height:2px;background:#c9a227;margin-bottom:24px;"></div>
-
-            <!-- Body -->
             <p style="margin:0 0 24px 0;font-size:13px;color:rgba(245,242,235,0.55);line-height:1.7;font-family:monospace;letter-spacing:.03em;">
               <strong style="color:#f5f2eb;">{inviter_name}</strong> vous invite à rejoindre
               <strong style="color:#f5f2eb;">{club_name}</strong> sur INSIGHTBALL.
             </p>
-
-            <!-- Role card -->
             <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:32px;">
               <tr>
                 <td style="background:rgba(201,162,39,0.06);border:1px solid rgba(201,162,39,0.15);padding:20px 24px;">
@@ -127,8 +100,6 @@ def send_invitation_email(invitee_email: str, club_name: str, inviter_name: str,
                 </td>
               </tr>
             </table>
-
-            <!-- CTA -->
             <table cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
               <tr>
                 <td style="background:#c9a227;">
@@ -139,25 +110,18 @@ def send_invitation_email(invitee_email: str, club_name: str, inviter_name: str,
                 </td>
               </tr>
             </table>
-
-            <!-- Note expiration -->
             <p style="margin:0;font-size:10px;color:rgba(245,242,235,0.2);font-family:monospace;letter-spacing:.03em;">
-              Ce lien est valable 7 jours. Si vous n'attendiez pas cette invitation, ignorez cet email.
+              Ce lien est valable 7 jours.
             </p>
-
           </td>
         </tr>
-
-        <!-- Footer -->
         <tr>
           <td style="padding:24px 0 0 0;">
             <p style="margin:0;font-size:10px;color:rgba(245,242,235,0.2);font-family:monospace;letter-spacing:.04em;">
-              Une question ?
               <a href="mailto:contact@insightball.com" style="color:#c9a227;text-decoration:none;">contact@insightball.com</a>
             </p>
           </td>
         </tr>
-
       </table>
     </td></tr>
   </table>
@@ -167,8 +131,6 @@ def send_invitation_email(invitee_email: str, club_name: str, inviter_name: str,
     except Exception as e:
         print(f"⚠️ Email invitation non envoyé : {e}")
 
-
-# ─── Endpoints ────────────────────────────────────────────────────────────────
 
 @router.get("", response_model=List[MemberResponse])
 def list_members(current_user: User = Depends(require_club_member), db: Session = Depends(get_db)):
@@ -184,28 +146,20 @@ def list_members(current_user: User = Depends(require_club_member), db: Session 
 def invite_member(body: InviteMemberRequest, current_user: User = Depends(require_club_admin), db: Session = Depends(get_db)):
     if body.role == MemberRole.COACH and not body.category:
         raise HTTPException(status_code=400, detail="Une catégorie est requise pour le rôle Coach")
-
     existing = db.query(ClubMember).filter(
         and_(ClubMember.club_id == current_user.club_id, ClubMember.email == body.email, ClubMember.status != InviteStatus.DECLINED)
     ).first()
     if existing:
         raise HTTPException(status_code=400, detail="Cet email a déjà une invitation active dans ce club")
-
     club = db.query(Club).filter(Club.id == current_user.club_id).first()
     token = secrets.token_urlsafe(32)
-
     member = ClubMember(
         id=str(uuid.uuid4()), club_id=current_user.club_id, email=body.email,
         role=body.role, category=body.category, status=InviteStatus.PENDING,
         invite_token=token, invited_by=current_user.id,
     )
-    db.add(member)
-    db.commit()
-
-    send_invitation_email(
-        invitee_email=body.email, club_name=club.name, inviter_name=current_user.name,
-        role=body.role.value, category=body.category, token=token,
-    )
+    db.add(member); db.commit()
+    send_invitation_email(body.email, club.name, current_user.name, body.role.value, body.category, token)
     return {"message": "Invitation envoyée", "id": member.id}
 
 
@@ -218,7 +172,6 @@ def accept_invitation(token: str, current_user: User = Depends(get_current_user)
         raise HTTPException(status_code=400, detail="Invitation déjà traitée")
     if member.email != current_user.email:
         raise HTTPException(status_code=403, detail="Cette invitation ne vous est pas destinée")
-
     member.status = InviteStatus.ACCEPTED
     member.user_id = current_user.id
     member.accepted_at = datetime.utcnow()
@@ -236,7 +189,6 @@ def update_member(member_id: str, body: UpdateMemberRequest, current_user: User 
         raise HTTPException(status_code=404, detail="Membre introuvable")
     if member.user_id == current_user.id:
         raise HTTPException(status_code=400, detail="Impossible de modifier son propre rôle")
-
     if body.role is not None:
         member.role = body.role
         if member.user_id:
@@ -255,9 +207,7 @@ def remove_member(member_id: str, current_user: User = Depends(require_club_admi
         raise HTTPException(status_code=404, detail="Membre introuvable")
     if member.user_id == current_user.id:
         raise HTTPException(status_code=400, detail="Impossible de se retirer soi-même")
-
     if member.user_id:
         user = db.query(User).filter(User.id == member.user_id).first()
         if user: user.club_id = None
-    db.delete(member)
-    db.commit()
+    db.delete(member); db.commit()

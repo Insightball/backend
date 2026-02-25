@@ -18,7 +18,7 @@ resend.api_key = os.getenv("RESEND_API_KEY")
 
 def send_welcome_email(user_name: str, user_email: str, plan: str):
     try:
-        plan_label = "Coach" if plan == "coach" else "Club"
+        plan_label = "Coach" if plan == "COACH" else "Club"
         resend.Emails.send({
             "from": "INSIGHTBALL <contact@insightball.com>",
             "to": user_email,
@@ -129,17 +129,11 @@ async def login(credentials: UserLogin, db: Session = Depends(get_db)):
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Compte supprimé — message spécifique avec lien de récupération
+    # Compte supprimé
     if user.deleted_at:
         if user.recovery_token_expires and datetime.utcnow() > user.recovery_token_expires:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="ACCOUNT_PERMANENTLY_DELETED"
-            )
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"ACCOUNT_DELETED:{user.recovery_token}"
-        )
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="ACCOUNT_PERMANENTLY_DELETED")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"ACCOUNT_DELETED:{user.recovery_token}")
 
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Inactive user")
