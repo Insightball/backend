@@ -162,3 +162,112 @@ async def get_current_user_info(current_user: User = Depends(get_current_user)):
         club_name=current_user.club.name if current_user.club else None,
         club_id=current_user.club_id,
     )
+
+
+def send_reset_email(user_name: str, user_email: str, reset_token: str):
+    try:
+        reset_url = f"https://www.insightball.com/reset-password?token={reset_token}"
+        resend.Emails.send({
+            "from": "INSIGHTBALL <contact@insightball.com>",
+            "to": user_email,
+            "subject": "Réinitialisation de votre mot de passe — INSIGHTBALL",
+            "html": f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#0a0908;font-family:monospace;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#0a0908;padding:40px 20px;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;">
+        <tr>
+          <td style="padding:0 0 32px 0;">
+            <span style="font-size:22px;font-weight:900;letter-spacing:.06em;color:#f5f2eb;font-family:monospace;">
+              INSIGHT<span style="color:#c9a227;">BALL</span>
+            </span>
+          </td>
+        </tr>
+        <tr>
+          <td style="background:#0f0e0c;border:1px solid rgba(255,255,255,0.07);border-top:2px solid #c9a227;padding:36px 32px;">
+            <p style="margin:0 0 8px 0;font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:#c9a227;font-family:monospace;">Sécurité du compte</p>
+            <h1 style="margin:0 0 20px 0;font-size:28px;text-transform:uppercase;color:#f5f2eb;font-family:monospace;letter-spacing:.03em;line-height:1.1;">
+              Réinitialiser<br/>votre mot de passe
+            </h1>
+            <div style="width:40px;height:2px;background:#c9a227;margin-bottom:24px;"></div>
+            <p style="margin:0 0 28px 0;font-size:13px;color:rgba(245,242,235,0.55);line-height:1.7;font-family:monospace;letter-spacing:.03em;">
+              Bonjour {user_name},<br/><br/>
+              Vous avez demandé la réinitialisation de votre mot de passe.
+              Ce lien est valable <strong style="color:#f5f2eb;">30 minutes</strong>.
+            </p>
+            <table cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+              <tr>
+                <td style="background:#c9a227;">
+                  <a href="{reset_url}"
+                     style="display:inline-block;padding:14px 32px;color:#0f0f0d;font-family:monospace;font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;text-decoration:none;">
+                    RÉINITIALISER MON MOT DE PASSE →
+                  </a>
+                </td>
+              </tr>
+            </table>
+            <p style="margin:0;font-size:11px;color:rgba(245,242,235,0.30);font-family:monospace;line-height:1.6;">
+              Si vous n'avez pas demandé cette réinitialisation, ignorez cet email.<br/>
+              Votre mot de passe restera inchangé.
+            </p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:24px 0 0 0;">
+            <p style="margin:0;font-size:10px;color:rgba(245,242,235,0.2);font-family:monospace;letter-spacing:.04em;">
+              <a href="mailto:contact@insightball.com" style="color:#c9a227;text-decoration:none;">contact@insightball.com</a>
+            </p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>"""
+        })
+    except Exception as e:
+        print(f"⚠️ Email reset non envoyé : {e}")
+
+
+@router.post("/forgot-password")
+@limiter.limit("3/minute")
+async def forgot_password(request: Request, body: dict, db: Session = Depends(get_db)):
+    email = body.get("email", "").strip().lower()
+    # Toujours répondre 200 pour ne pas révéler si l'email existe
+    user = db.query(User).filter(User.email == email, User.deleted_at == None).first()
+    if user:
+        reset_token = str(uuid.uuid4())
+        user.recovery_token = reset_token
+        user.recovery_token_expires = datetime.utcnow() + timedelta(minutes=30)
+        db.commit()
+        send_reset_email(user.name, user.email, reset_token)
+    return {"message": "Si cet email existe, un lien a été envoyé."}
+
+
+@router.post("/reset-password")
+@limiter.limit("5/minute")
+async def reset_password(request: Request, body: dict, db: Session = Depends(get_db)):
+    token = body.get("token", "").strip()
+    new_password = body.get("password", "").strip()
+
+    if not token or not new_password or len(new_password) < 8:
+        raise HTTPException(status_code=400, detail="Token ou mot de passe invalide")
+
+    user = db.query(User).filter(
+        User.recovery_token == token,
+        User.deleted_at == None
+    ).first()
+
+    if not user:
+        raise HTTPException(status_code=400, detail="Lien invalide ou expiré")
+
+    if user.recovery_token_expires and datetime.utcnow() > user.recovery_token_expires:
+        raise HTTPException(status_code=400, detail="Lien expiré")
+
+    user.hashed_password = get_password_hash(new_password)
+    user.recovery_token = None
+    user.recovery_token_expires = None
+    db.commit()
+
+    return {"message": "Mot de passe réinitialisé avec succès"}
