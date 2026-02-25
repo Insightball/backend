@@ -13,53 +13,101 @@ from app.dependencies import get_current_user
 from app.config import settings
 
 router = APIRouter()
-
-# Resend setup
 resend.api_key = os.getenv("RESEND_API_KEY")
 
 
 def send_welcome_email(user_name: str, user_email: str, plan: str):
-    """Envoie un email de bienvenue après inscription"""
     try:
         plan_label = "Coach" if plan == "coach" else "Club"
         resend.Emails.send({
             "from": "INSIGHTBALL <contact@insightball.com>",
             "to": user_email,
-            "subject": "Bienvenue sur INSIGHTBALL 🎉",
-            "html": f"""
-            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #0f1117; color: #e2e8f0; padding: 40px; border-radius: 12px;">
-                <div style="text-align: center; margin-bottom: 32px;">
-                    <h1 style="color: #c9a227; font-size: 28px; margin: 0; font-family: monospace; letter-spacing: .06em;">⚽ INSIGHTBALL</h1>
-                </div>
-                
-                <h2 style="font-size: 22px; margin-bottom: 8px;">Bienvenue, {user_name} ! 👋</h2>
-                <p style="color: #94a3b8; line-height: 1.6;">
-                    Ton compte <strong style="color: #e2e8f0;">Plan {plan_label}</strong> est prêt. 
-                    Tu peux dès maintenant analyser tes matchs, suivre tes joueurs et améliorer les performances de ton équipe.
-                </p>
+            "subject": f"Bienvenue sur INSIGHTBALL — Plan {plan_label}",
+            "html": f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#0a0908;font-family:monospace;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#0a0908;padding:40px 20px;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;">
 
-                <div style="background: #1a1d27; border: 1px solid #2d3148; border-radius: 8px; padding: 24px; margin: 24px 0;">
-                    <h3 style="margin: 0 0 12px 0; color: #c9a227;">Ce que tu peux faire :</h3>
-                    <ul style="color: #94a3b8; line-height: 2; padding-left: 20px; margin: 0;">
-                        <li>📹 Uploader et analyser tes matchs</li>
-                        <li>👥 Gérer tes joueurs et leurs stats</li>
-                        <li>📊 Visualiser les performances</li>
-                        <li>🗺️ Créer des compositions tactiques</li>
-                    </ul>
-                </div>
+        <!-- Logo -->
+        <tr>
+          <td style="padding:0 0 32px 0;">
+            <span style="font-size:22px;font-weight:900;letter-spacing:.06em;color:#f5f2eb;font-family:monospace;">
+              INSIGHT<span style="color:#c9a227;">BALL</span>
+            </span>
+          </td>
+        </tr>
 
-                <div style="text-align: center; margin-top: 32px;">
-                    <a href="https://www.insightball.com/dashboard" 
-                       style="background: #c9a227; color: #0f0f0d; padding: 14px 32px; border-radius: 4px; text-decoration: none; font-weight: bold; font-size: 14px; font-family: monospace; letter-spacing: .08em; text-transform: uppercase;">
-                        Accéder à mon dashboard →
-                    </a>
-                </div>
+        <!-- Card principale -->
+        <tr>
+          <td style="background:#0f0e0c;border:1px solid rgba(255,255,255,0.07);border-top:2px solid #c9a227;padding:36px 32px;">
 
-                <p style="color: #475569; font-size: 12px; text-align: center; margin-top: 32px;">
-                    Une question ? Réponds à cet email ou contacte-nous à contact@insightball.com
-                </p>
-            </div>
-            """
+            <!-- Subtitle -->
+            <p style="margin:0 0 8px 0;font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:#c9a227;font-family:monospace;">
+              Plan {plan_label}
+            </p>
+
+            <!-- Title -->
+            <h1 style="margin:0 0 20px 0;font-size:32px;text-transform:uppercase;color:#f5f2eb;font-family:monospace;letter-spacing:.03em;line-height:1.1;">
+              Bienvenue,<br/>{user_name} !
+            </h1>
+
+            <!-- Separator -->
+            <div style="width:40px;height:2px;background:#c9a227;margin-bottom:24px;"></div>
+
+            <!-- Body -->
+            <p style="margin:0 0 28px 0;font-size:13px;color:rgba(245,242,235,0.55);line-height:1.7;font-family:monospace;letter-spacing:.03em;">
+              Ton compte est prêt. Tu peux dès maintenant analyser tes matchs,
+              suivre tes joueurs et améliorer les performances de ton équipe.
+            </p>
+
+            <!-- Features -->
+            <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:32px;">
+              <tr>
+                <td style="background:rgba(201,162,39,0.06);border:1px solid rgba(201,162,39,0.15);padding:20px 24px;">
+                  <p style="margin:0 0 12px 0;font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:#c9a227;font-family:monospace;">Ce que tu peux faire</p>
+                  {''.join([f'<p style="margin:0 0 8px 0;font-size:12px;color:rgba(245,242,235,0.6);font-family:monospace;letter-spacing:.03em;">→ {feat}</p>' for feat in [
+                    'Uploader et analyser tes matchs',
+                    'Gérer tes joueurs et leurs stats',
+                    'Visualiser les performances',
+                    'Créer des compositions tactiques',
+                  ]])}
+                </td>
+              </tr>
+            </table>
+
+            <!-- CTA -->
+            <table cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="background:#c9a227;">
+                  <a href="https://www.insightball.com/x-portal-7f2a/login"
+                     style="display:inline-block;padding:14px 32px;color:#0f0f0d;font-family:monospace;font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;text-decoration:none;">
+                    ACCÉDER AU DASHBOARD →
+                  </a>
+                </td>
+              </tr>
+            </table>
+
+          </td>
+        </tr>
+
+        <!-- Footer -->
+        <tr>
+          <td style="padding:24px 0 0 0;">
+            <p style="margin:0;font-size:10px;color:rgba(245,242,235,0.2);font-family:monospace;letter-spacing:.04em;">
+              Une question ? Contacte-nous à
+              <a href="mailto:contact@insightball.com" style="color:#c9a227;text-decoration:none;">contact@insightball.com</a>
+            </p>
+          </td>
+        </tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>"""
         })
     except Exception as e:
         print(f"⚠️ Email de bienvenue non envoyé : {e}")
@@ -67,34 +115,18 @@ def send_welcome_email(user_name: str, user_email: str, plan: str):
 
 @router.post("/signup", response_model=Token)
 async def signup(user_data: UserSignup, db: Session = Depends(get_db)):
-    """Create a new user account"""
-
-    # Check if user already exists
     existing_user = db.query(User).filter(User.email == user_data.email).first()
     if existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
 
-    # Create club if CLUB plan
     club = None
     if user_data.plan == PlanType.CLUB:
         if not user_data.club_name:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Club name is required for CLUB plan"
-            )
-
-        club = Club(
-            id=str(uuid.uuid4()),
-            name=user_data.club_name,
-            quota_matches=10
-        )
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Club name is required for CLUB plan")
+        club = Club(id=str(uuid.uuid4()), name=user_data.club_name, quota_matches=10)
         db.add(club)
         db.flush()
 
-    # Create user
     user = User(
         id=str(uuid.uuid4()),
         email=user_data.email,
@@ -103,62 +135,36 @@ async def signup(user_data: UserSignup, db: Session = Depends(get_db)):
         plan=user_data.plan,
         club_id=club.id if club else None
     )
-
     db.add(user)
     db.commit()
     db.refresh(user)
 
-    # Envoyer email de bienvenue
     send_welcome_email(user.name, user.email, user.plan.value)
 
-    # Create access token
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": user.email},
-        expires_delta=access_token_expires
-    )
-
+    access_token = create_access_token(data={"sub": user.email}, expires_delta=access_token_expires)
     return {"access_token": access_token, "token_type": "bearer"}
 
 
 @router.post("/login", response_model=Token)
 async def login(credentials: UserLogin, db: Session = Depends(get_db)):
-    """Authenticate user and return JWT token"""
-
     user = db.query(User).filter(User.email == credentials.email).first()
-
     if not user or not verify_password(credentials.password, user.hashed_password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect email or password", headers={"WWW-Authenticate": "Bearer"})
     if not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Inactive user"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Inactive user")
 
-    # Update last_login
     from datetime import datetime
     user.last_login = datetime.utcnow()
     db.commit()
 
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": user.email},
-        expires_delta=access_token_expires
-    )
-
+    access_token = create_access_token(data={"sub": user.email}, expires_delta=access_token_expires)
     return {"access_token": access_token, "token_type": "bearer"}
 
 
 @router.get("/me", response_model=UserResponse)
-async def get_current_user_info(
-    current_user: User = Depends(get_current_user)
-):
-    """Get current user info"""
+async def get_current_user_info(current_user: User = Depends(get_current_user)):
     return UserResponse(
         id=current_user.id,
         email=current_user.email,
