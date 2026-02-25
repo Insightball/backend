@@ -10,4 +10,5 @@ pydantic[email]
 pydantic-settings
 resend
 boto3
+stripe
 apscheduler
