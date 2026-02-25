@@ -30,7 +30,7 @@ class User(Base):
     club_id = Column(String, ForeignKey("clubs.id"), nullable=True)
     role = Column(Enum(UserRole), default=UserRole.ADMIN)
     
-    # Superadmin (panel admin caché - indépendant du rôle club)
+    # Superadmin
     is_superadmin = Column(Boolean, default=False)
     
     # Metadata
@@ -38,6 +38,11 @@ class User(Base):
     last_login = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Soft delete — récupérable 30 jours
+    deleted_at = Column(DateTime, nullable=True)
+    recovery_token = Column(String, nullable=True, unique=True)
+    recovery_token_expires = Column(DateTime, nullable=True)
     
     # Relationships
     club = relationship("Club", back_populates="members")
