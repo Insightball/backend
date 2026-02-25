@@ -20,6 +20,9 @@ class Player(Base):
     height = Column(Float, nullable=True)
     weight = Column(Float, nullable=True)
     
+    # Physique — pied fort
+    preferred_foot = Column(String, nullable=True)  # 'droit' | 'gauche' | 'ambidextre'
+
     # Média
     photo_url = Column(String, nullable=True)
     
