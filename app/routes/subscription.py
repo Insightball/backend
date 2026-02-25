@@ -106,29 +106,46 @@ async def get_subscription_status(
     current_user: User = Depends(get_current_active_user)
 ):
     """Get current subscription status"""
-    
+
+    # Pas de subscription_id → on cherche via customer_id
     if not current_user.stripe_subscription_id:
+        if current_user.stripe_customer_id:
+            try:
+                subs = stripe.Subscription.list(
+                    customer=current_user.stripe_customer_id,
+                    status='active',
+                    limit=1
+                )
+                if subs.data:
+                    sub = subs.data[0]
+                    return {
+                        "active": True,
+                        "plan": current_user.plan.value if hasattr(current_user.plan, 'value') else current_user.plan,
+                        "status": sub.status,
+                        "current_period_end": sub.current_period_end,
+                        "cancel_at_period_end": sub.cancel_at_period_end,
+                    }
+            except stripe.error.StripeError:
+                pass
         return {
             "active": False,
-            "plan": current_user.plan,
+            "plan": current_user.plan.value if hasattr(current_user.plan, 'value') else current_user.plan,
             "status": "inactive"
         }
-    
+
     try:
         subscription = stripe.Subscription.retrieve(current_user.stripe_subscription_id)
-        
         return {
             "active": subscription.status == "active",
-            "plan": current_user.plan,
+            "plan": current_user.plan.value if hasattr(current_user.plan, 'value') else current_user.plan,
             "status": subscription.status,
             "current_period_end": subscription.current_period_end,
-            "cancel_at_period_end": subscription.cancel_at_period_end
+            "cancel_at_period_end": subscription.cancel_at_period_end,
         }
-        
     except stripe.error.StripeError as e:
         return {
             "active": False,
-            "plan": current_user.plan,
+            "plan": current_user.plan.value if hasattr(current_user.plan, 'value') else current_user.plan,
             "status": "error",
             "error": str(e)
         }
