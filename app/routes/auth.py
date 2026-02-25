@@ -161,6 +161,7 @@ async def get_current_user_info(current_user: User = Depends(get_current_user)):
         role=current_user.role.value if current_user.role else None,
         club_name=current_user.club.name if current_user.club else None,
         club_id=current_user.club_id,
+        club_logo=current_user.club.logo_url if current_user.club else None,
     )
 
 
