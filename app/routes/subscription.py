@@ -153,15 +153,19 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
     # Handle different event types
     if event['type'] == 'checkout.session.completed':
         session = event['data']['object']
-        
-        # Get user
+
         user_id = session['metadata'].get('user_id')
-        plan = session['metadata'].get('plan')
-        
+        plan_str = session['metadata'].get('plan', '').upper()  # 'club' → 'CLUB'
+
         user = db.query(User).filter(User.id == user_id).first()
         if user:
-            user.stripe_subscription_id = session['subscription']
-            user.plan = plan
+            from app.models.user import PlanType
+            try:
+                user.plan = PlanType(plan_str)
+            except ValueError:
+                user.plan = PlanType.COACH
+            user.stripe_subscription_id = session.get('subscription')
+            user.stripe_customer_id = session.get('customer') or user.stripe_customer_id
             user.is_active = True
             db.commit()
     
