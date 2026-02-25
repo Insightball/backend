@@ -135,11 +135,15 @@ async def get_subscription_status(
 
     try:
         subscription = stripe.Subscription.retrieve(current_user.stripe_subscription_id)
+        plan_val = current_user.plan.value if hasattr(current_user.plan, 'value') else current_user.plan
+        # current_period_end est sur l'item dans la nouvelle API Stripe
+        item = subscription.items.data[0] if subscription.items.data else None
+        period_end = getattr(item, 'current_period_end', None) if item else None
         return {
             "active": subscription.status == "active",
-            "plan": current_user.plan.value if hasattr(current_user.plan, 'value') else current_user.plan,
+            "plan": plan_val,
             "status": subscription.status,
-            "current_period_end": subscription.current_period_end,
+            "current_period_end": period_end,
             "cancel_at_period_end": subscription.cancel_at_period_end,
         }
     except stripe.error.StripeError as e:
