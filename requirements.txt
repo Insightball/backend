@@ -5,6 +5,7 @@ psycopg2-binary
 alembic
 python-jose[cryptography]
 passlib[bcrypt]
+argon2-cffi
 python-multipart
 pydantic[email]
 pydantic-settings
@@ -12,3 +13,4 @@ resend
 boto3
 stripe
 apscheduler
+slowapi
