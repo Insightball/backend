@@ -5,8 +5,7 @@ from contextlib import asynccontextmanager
 import logging
 
 from app.database import engine, Base
-from app.routes import auth, matches, players, club, stats, admin, club_members
-from app.routes import account
+from app.routes import auth, matches, players, clubs, subscription, upload, leads, admin, club_members, account, notifications
 from app.models import User, Club, Match
 from app.models.club_member import ClubMember
 
@@ -52,14 +51,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(auth.router,          prefix="/api/auth",         tags=["auth"])
-app.include_router(account.router,       prefix="/api/account",      tags=["account"])
-app.include_router(matches.router,       prefix="/api/matches",      tags=["matches"])
-app.include_router(players.router,       prefix="/api/players",      tags=["players"])
-app.include_router(club.router,          prefix="/api/club",         tags=["club"])
-app.include_router(club_members.router,  prefix="/api/club/members", tags=["club-members"])
-app.include_router(stats.router,         prefix="/api/stats",        tags=["stats"])
-app.include_router(admin.router,         prefix="/api/x-admin",      tags=["admin"])
+app.include_router(auth.router,          prefix="/api/auth",          tags=["auth"])
+app.include_router(account.router,       prefix="/api/account",       tags=["account"])
+app.include_router(matches.router,       prefix="/api/matches",       tags=["matches"])
+app.include_router(players.router,       prefix="/api/players",       tags=["players"])
+app.include_router(clubs.router,         prefix="/api/club",          tags=["club"])
+app.include_router(club_members.router,  prefix="/api/club/members",  tags=["club-members"])
+app.include_router(subscription.router,  prefix="/api/subscription",  tags=["subscription"])
+app.include_router(upload.router,        prefix="/api/upload",        tags=["upload"])
+app.include_router(leads.router,         prefix="/api/leads",         tags=["leads"])
+app.include_router(notifications.router, prefix="/api/notifications", tags=["notifications"])
+app.include_router(admin.router,         prefix="/api/x-admin",       tags=["admin"])
 
 
 @app.get("/")
