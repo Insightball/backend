@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from datetime import timedelta
+from datetime import datetime, timedelta
 import uuid
 import resend
 import os
@@ -30,8 +30,6 @@ def send_welcome_email(user_name: str, user_email: str, plan: str):
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#0a0908;padding:40px 20px;">
     <tr><td align="center">
       <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;">
-
-        <!-- Logo -->
         <tr>
           <td style="padding:0 0 32px 0;">
             <span style="font-size:22px;font-weight:900;letter-spacing:.06em;color:#f5f2eb;font-family:monospace;">
@@ -39,46 +37,25 @@ def send_welcome_email(user_name: str, user_email: str, plan: str):
             </span>
           </td>
         </tr>
-
-        <!-- Card principale -->
         <tr>
           <td style="background:#0f0e0c;border:1px solid rgba(255,255,255,0.07);border-top:2px solid #c9a227;padding:36px 32px;">
-
-            <!-- Subtitle -->
-            <p style="margin:0 0 8px 0;font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:#c9a227;font-family:monospace;">
-              Plan {plan_label}
-            </p>
-
-            <!-- Title -->
+            <p style="margin:0 0 8px 0;font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:#c9a227;font-family:monospace;">Plan {plan_label}</p>
             <h1 style="margin:0 0 20px 0;font-size:32px;text-transform:uppercase;color:#f5f2eb;font-family:monospace;letter-spacing:.03em;line-height:1.1;">
               Bienvenue,<br/>{user_name} !
             </h1>
-
-            <!-- Separator -->
             <div style="width:40px;height:2px;background:#c9a227;margin-bottom:24px;"></div>
-
-            <!-- Body -->
             <p style="margin:0 0 28px 0;font-size:13px;color:rgba(245,242,235,0.55);line-height:1.7;font-family:monospace;letter-spacing:.03em;">
               Ton compte est prêt. Tu peux dès maintenant analyser tes matchs,
               suivre tes joueurs et améliorer les performances de ton équipe.
             </p>
-
-            <!-- Features -->
             <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:32px;">
               <tr>
                 <td style="background:rgba(201,162,39,0.06);border:1px solid rgba(201,162,39,0.15);padding:20px 24px;">
                   <p style="margin:0 0 12px 0;font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:#c9a227;font-family:monospace;">Ce que tu peux faire</p>
-                  {''.join([f'<p style="margin:0 0 8px 0;font-size:12px;color:rgba(245,242,235,0.6);font-family:monospace;letter-spacing:.03em;">→ {feat}</p>' for feat in [
-                    'Uploader et analyser tes matchs',
-                    'Gérer tes joueurs et leurs stats',
-                    'Visualiser les performances',
-                    'Créer des compositions tactiques',
-                  ]])}
+                  {''.join([f'<p style="margin:0 0 8px 0;font-size:12px;color:rgba(245,242,235,0.6);font-family:monospace;letter-spacing:.03em;">→ {feat}</p>' for feat in ['Uploader et analyser tes matchs', 'Gérer tes joueurs et leurs stats', 'Visualiser les performances', 'Créer des compositions tactiques']])}
                 </td>
               </tr>
             </table>
-
-            <!-- CTA -->
             <table cellpadding="0" cellspacing="0">
               <tr>
                 <td style="background:#c9a227;">
@@ -89,20 +66,15 @@ def send_welcome_email(user_name: str, user_email: str, plan: str):
                 </td>
               </tr>
             </table>
-
           </td>
         </tr>
-
-        <!-- Footer -->
         <tr>
           <td style="padding:24px 0 0 0;">
             <p style="margin:0;font-size:10px;color:rgba(245,242,235,0.2);font-family:monospace;letter-spacing:.04em;">
-              Une question ? Contacte-nous à
               <a href="mailto:contact@insightball.com" style="color:#c9a227;text-decoration:none;">contact@insightball.com</a>
             </p>
           </td>
         </tr>
-
       </table>
     </td></tr>
   </table>
@@ -149,12 +121,29 @@ async def signup(user_data: UserSignup, db: Session = Depends(get_db)):
 @router.post("/login", response_model=Token)
 async def login(credentials: UserLogin, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == credentials.email).first()
+
     if not user or not verify_password(credentials.password, user.hashed_password):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect email or password", headers={"WWW-Authenticate": "Bearer"})
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # Compte supprimé — message spécifique avec lien de récupération
+    if user.deleted_at:
+        if user.recovery_token_expires and datetime.utcnow() > user.recovery_token_expires:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="ACCOUNT_PERMANENTLY_DELETED"
+            )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"ACCOUNT_DELETED:{user.recovery_token}"
+        )
+
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Inactive user")
 
-    from datetime import datetime
     user.last_login = datetime.utcnow()
     db.commit()
 
