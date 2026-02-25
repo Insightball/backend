@@ -11,6 +11,7 @@ class PlayerBase(BaseModel):
     birth_date: Optional[datetime] = None
     height: Optional[float] = None
     weight: Optional[float] = None
+    preferred_foot: Optional[str] = None  # 'droit' | 'gauche' | 'ambidextre'
 
 class PlayerCreate(PlayerBase):
     pass
@@ -25,13 +26,15 @@ class PlayerUpdate(BaseModel):
     height: Optional[float] = None
     weight: Optional[float] = None
     status: Optional[str] = None
+    preferred_foot: Optional[str] = None  # 'droit' | 'gauche' | 'ambidextre'
 
 class PlayerResponse(PlayerBase):
     id: str
     club_id: Optional[str] = None
     status: Optional[str] = "actif"
+    preferred_foot: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
-    
+
     class Config:
         from_attributes = True

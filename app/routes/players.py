@@ -43,7 +43,8 @@ async def create_player(
         birth_date=player_data.birth_date,
         height=player_data.height,
         weight=player_data.weight,
-status="actif"
+        preferred_foot=player_data.preferred_foot,
+        status="actif"
     )
     
     db.add(player)
