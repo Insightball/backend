@@ -55,8 +55,8 @@ async def create_club(club_data: ClubCreate, current_user: User = Depends(get_cu
     db.flush()
     # Associer l'utilisateur
     current_user.club_id = club.id
-    from app.models.user import RoleType
-    current_user.role = RoleType.ADMIN
+    from app.models.user import UserRole
+    current_user.role = UserRole.ADMIN
     db.commit(); db.refresh(club)
     return club
 
