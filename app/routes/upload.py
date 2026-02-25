@@ -89,3 +89,38 @@ async def get_presigned_download_url(
             status_code=500,
             detail=f"Error generating presigned URL: {str(e)}"
         )
+
+
+@router.post("/presigned-url/image", response_model=S3PresignedUrlResponse)
+async def get_presigned_image_url(
+    request: S3PresignedUrlRequest,
+    current_user: User = Depends(get_current_active_user)
+):
+    """Get a presigned URL for uploading an image (logo, photo) to S3"""
+
+    allowed_types = ['image/jpeg', 'image/png', 'image/webp', 'image/svg+xml']
+    if request.content_type not in allowed_types:
+        raise HTTPException(status_code=400, detail="Type de fichier non autorisé. Utilisez JPG, PNG, WEBP ou SVG.")
+
+    try:
+        file_extension = request.filename.split('.')[-1].lower()
+        file_key = f"images/{current_user.id}/{uuid.uuid4()}.{file_extension}"
+
+        presigned_url = s3_client.generate_presigned_url(
+            'put_object',
+            Params={
+                'Bucket': settings.AWS_BUCKET_NAME,
+                'Key': file_key,
+                'ContentType': request.content_type,
+            },
+            ExpiresIn=900  # 15 min
+        )
+
+        return S3PresignedUrlResponse(
+            upload_url=presigned_url,
+            file_key=file_key,
+            expires_in=900
+        )
+
+    except ClientError as e:
+        raise HTTPException(status_code=500, detail=f"Erreur S3 : {str(e)}")
