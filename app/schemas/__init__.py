@@ -30,7 +30,7 @@ class UserResponse(BaseModel):
     role: Optional[str] = None
     club_name: Optional[str] = None
     club_id: Optional[str] = None
-
+    
     class Config:
         from_attributes = True
 
@@ -69,7 +69,7 @@ class MatchResponse(BaseModel):
     location: Optional[str] = None
     uploaded_at: Optional[datetime] = None
     processed_at: Optional[datetime] = None
-
+    
     class Config:
         from_attributes = True
 
@@ -82,7 +82,7 @@ class ClubResponse(BaseModel):
     name: str
     quota_matches: int
     created_at: datetime
-
+    
     class Config:
         from_attributes = True
 
