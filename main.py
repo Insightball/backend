@@ -25,6 +25,7 @@ app.add_middleware(
 from app.database import Base, engine
 from app.models import User, Club, Match, Player, Notification
 from app.models.lead import Lead
+from app.models.club_member import ClubMember
 
 @app.on_event("startup")
 async def startup_event():
@@ -46,7 +47,7 @@ async def health_check():
     }
 
 # Import routes APRÈS le middleware
-from app.routes import auth, matches, upload, players, clubs, notifications, subscription, leads, admin
+from app.routes import auth, matches, upload, players, clubs, notifications, subscription, leads, admin, club_members
 
 app.include_router(auth.router,          prefix="/api/auth",          tags=["auth"])
 app.include_router(matches.router,       prefix="/api/matches",       tags=["matches"])
@@ -57,6 +58,7 @@ app.include_router(notifications.router, prefix="/api/notifications", tags=["not
 app.include_router(subscription.router,  prefix="/api/subscription",  tags=["subscription"])
 app.include_router(leads.router,         prefix="/api/leads",         tags=["leads"])
 app.include_router(admin.router,         prefix="/api/x-admin",       tags=["admin"])
+app.include_router(club_members.router,  prefix="/api/club/members",  tags=["club-members"])
 
 if __name__ == "__main__":
     import uvicorn
