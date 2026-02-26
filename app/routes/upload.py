@@ -11,13 +11,14 @@ from app.dependencies import get_current_active_user
 
 router = APIRouter()
 
-# Initialize S3 client
-s3_client = boto3.client(
-    's3',
-    aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-    aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-    region_name=settings.AWS_REGION
-)
+def get_s3_client():
+    return boto3.client(
+        's3',
+        aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+        region_name=settings.AWS_REGION,
+        endpoint_url=f"https://s3.{settings.AWS_REGION}.amazonaws.com"
+    )
 
 @router.post("/presigned-url", response_model=S3PresignedUrlResponse)
 async def get_presigned_upload_url(
@@ -32,7 +33,7 @@ async def get_presigned_upload_url(
         file_key = f"videos/{current_user.id}/{uuid.uuid4()}.{file_extension}"
         
         # Generate presigned URL (valid for 1 hour)
-        presigned_url = s3_client.generate_presigned_url(
+        presigned_url = get_s3_client().generate_presigned_url(
             'put_object',
             Params={
                 'Bucket': settings.AWS_BUCKET_NAME,
@@ -70,7 +71,7 @@ async def get_presigned_download_url(
             )
         
         # Generate presigned URL (valid for 1 hour)
-        presigned_url = s3_client.generate_presigned_url(
+        presigned_url = get_s3_client().generate_presigned_url(
             'get_object',
             Params={
                 'Bucket': settings.AWS_BUCKET_NAME,
@@ -106,7 +107,7 @@ async def get_presigned_image_url(
         file_extension = request.filename.split('.')[-1].lower()
         file_key = f"images/{current_user.id}/{uuid.uuid4()}.{file_extension}"
 
-        presigned_url = s3_client.generate_presigned_url(
+        presigned_url = get_s3_client().generate_presigned_url(
             'put_object',
             Params={
                 'Bucket': settings.AWS_BUCKET_NAME,
