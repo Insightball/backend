@@ -13,8 +13,10 @@ router = APIRouter()
 
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 
-STRIPE_PRICE_COACH = os.getenv("STRIPE_PRICE_COACH", "price_coach_29")
-STRIPE_PRICE_CLUB  = os.getenv("STRIPE_PRICE_CLUB",  "price_club_99")
+# 26a0Fe0f  COACH: 39 20ac/mois  |  Mettre 00e0 jour dans Render > Environment Variables
+STRIPE_PRICE_COACH = os.getenv("STRIPE_PRICE_COACH", "price_coach_39")
+# 26a0Fe0f  CLUB : 129 20ac/mois  |  Mettre 00e0 jour dans Render > Environment Variables
+STRIPE_PRICE_CLUB  = os.getenv("STRIPE_PRICE_CLUB",  "price_club_129")
 
 class CheckoutSessionCreate(BaseModel):
     plan: str
