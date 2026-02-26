@@ -39,6 +39,17 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    # Trial
+    trial_match_used = Column(Boolean, default=False)
+    trial_ends_at = Column(DateTime, nullable=True)
+
+    # Profile perso (onboarding)
+    profile_role = Column(String, nullable=True)      # Éducateur, Entraîneur...
+    profile_level = Column(String, nullable=True)     # National, Régional...
+    profile_phone = Column(String, nullable=True)
+    profile_city = Column(String, nullable=True)
+    profile_diploma = Column(String, nullable=True)   # CFI, BEF...
+
     # Soft delete — récupérable 30 jours
     deleted_at = Column(DateTime, nullable=True)
     recovery_token = Column(String, nullable=True, unique=True)

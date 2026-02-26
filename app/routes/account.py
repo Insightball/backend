@@ -172,6 +172,55 @@ def send_recovery_email(user_name: str, user_email: str):
 
 # ─── Endpoints ────────────────────────────────────────────────────────────────
 
+
+from pydantic import BaseModel
+from typing import Optional
+
+class ProfileUpdate(BaseModel):
+    role: Optional[str] = None
+    level: Optional[str] = None
+    phone: Optional[str] = None
+    city: Optional[str] = None
+    diploma: Optional[str] = None
+
+@router.patch("/profile")
+def update_profile(
+    data: ProfileUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Met à jour le profil personnel de l'utilisateur"""
+    if data.role is not None: current_user.profile_role = data.role
+    if data.level is not None: current_user.profile_level = data.level
+    if data.phone is not None: current_user.profile_phone = data.phone
+    if data.city is not None: current_user.profile_city = data.city
+    if data.diploma is not None: current_user.profile_diploma = data.diploma
+    current_user.updated_at = datetime.utcnow()
+    db.commit()
+    return {
+        "role": current_user.profile_role,
+        "level": current_user.profile_level,
+        "phone": current_user.profile_phone,
+        "city": current_user.profile_city,
+        "diploma": current_user.profile_diploma,
+    }
+
+@router.get("/profile")
+def get_profile(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Récupère le profil personnel"""
+    return {
+        "name": current_user.name,
+        "email": current_user.email,
+        "role": current_user.profile_role,
+        "level": current_user.profile_level,
+        "phone": current_user.profile_phone,
+        "city": current_user.profile_city,
+        "diploma": current_user.profile_diploma,
+    }
+
 @router.delete("/delete")
 def delete_account(
     background_tasks: BackgroundTasks,
