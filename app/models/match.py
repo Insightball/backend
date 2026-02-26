@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, Enum, JSON
+from sqlalchemy import Column, String, Integer, Boolean, DateTime, ForeignKey, Enum, JSON, Text
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
@@ -51,6 +51,17 @@ class Match(Base):
     
     # Stats
     stats = Column(JSON, nullable=True)
+    
+    # Match context
+    is_home = Column(Boolean, default=True)
+    formation = Column(String, nullable=True)       # ex: "4-3-3"
+    opponent_formation = Column(String, nullable=True)
+    
+    # IA Analysis output
+    analysis_data = Column(JSON, nullable=True)     # heatmaps, player tracking, phases
+    ai_insights = Column(Text, nullable=True)       # texte généré par GPT-4
+    player_stats = Column(JSON, nullable=True)      # stats individuelles par joueur
+    events = Column(JSON, nullable=True)            # buts, cartons, remplacements
     
     # Metadata
     uploaded_at = Column(DateTime, default=datetime.utcnow)
