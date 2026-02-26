@@ -299,6 +299,20 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
     return {"status": "success"}
 
 
+
+# ─────────────────────────────────────────────
+# UTILISER L'ANALYSE TRIAL
+# ─────────────────────────────────────────────
+@router.post("/use-trial-match")
+async def use_trial_match(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Marque l'analyse trial comme utilisée"""
+    current_user.trial_match_used = True
+    db.commit()
+    return {"success": True}
+
 # ─────────────────────────────────────────────
 # ANNULATION
 # ─────────────────────────────────────────────
