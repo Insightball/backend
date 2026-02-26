@@ -35,6 +35,12 @@ class UserAdminView(BaseModel):
     stripe_subscription_id: Optional[str] = None
     last_login: Optional[datetime] = None
     created_at: datetime
+    profile_role: Optional[str] = None
+    profile_level: Optional[str] = None
+    profile_phone: Optional[str] = None
+    profile_city: Optional[str] = None
+    profile_diploma: Optional[str] = None
+    trial_match_used: Optional[bool] = None
     class Config:
         from_attributes = True
 
@@ -95,6 +101,10 @@ def admin_list_users(skip: int = 0, limit: int = 50, search: Optional[str] = Non
         club_id=u.club_id, club_name=u.club.name if u.club else None,
         stripe_customer_id=u.stripe_customer_id, stripe_subscription_id=u.stripe_subscription_id,
         last_login=u.last_login, created_at=u.created_at,
+        profile_role=u.profile_role, profile_level=u.profile_level,
+        profile_phone=u.profile_phone, profile_city=u.profile_city,
+        profile_diploma=u.profile_diploma,
+        trial_match_used=getattr(u, 'trial_match_used', False),
     ) for u in users]
 
 
@@ -111,6 +121,10 @@ def admin_get_user(user_id: str, db: Session = Depends(get_db), _: User = Depend
         club_id=u.club_id, club_name=u.club.name if u.club else None,
         stripe_customer_id=u.stripe_customer_id, stripe_subscription_id=u.stripe_subscription_id,
         last_login=u.last_login, created_at=u.created_at,
+        profile_role=u.profile_role, profile_level=u.profile_level,
+        profile_phone=u.profile_phone, profile_city=u.profile_city,
+        profile_diploma=u.profile_diploma,
+        trial_match_used=getattr(u, 'trial_match_used', False),
     )
 
 
