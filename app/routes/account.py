@@ -12,6 +12,7 @@ import os
 from app.database import get_db
 from app.models import User
 from app.dependencies import get_current_user
+from app.utils.auth import get_password_hash, verify_password
 
 router = APIRouter()
 resend.api_key = os.getenv("RESEND_API_KEY")
@@ -220,6 +221,26 @@ def get_profile(
         "city": current_user.profile_city,
         "diploma": current_user.profile_diploma,
     }
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+@router.post("/change-password")
+def change_password(
+    data: ChangePasswordRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if not verify_password(data.current_password, current_user.hashed_password):
+        raise HTTPException(status_code=400, detail="Mot de passe actuel incorrect")
+    if len(data.new_password) < 8:
+        raise HTTPException(status_code=400, detail="8 caractères minimum")
+    current_user.hashed_password = get_password_hash(data.new_password)
+    current_user.updated_at = datetime.utcnow()
+    db.commit()
+    return {"message": "Mot de passe modifié"}
 
 @router.delete("/delete")
 def delete_account(
