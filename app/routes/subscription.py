@@ -18,21 +18,21 @@ stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 # ─────────────────────────────────────────────
 def _send_trial_reminder_email(to_email: str, name: str, debit_date: str):
     """
-    Envoie l'email de rappel J-2 avant fin trial via Brevo API.
-    Nécessite BREVO_API_KEY dans les variables d'environnement Render.
+    Envoie l'email de rappel J-2 avant fin trial via Resend.
+    Nécessite RESEND_API_KEY dans les variables d'environnement Render.
     """
     import httpx
-    brevo_key = os.getenv("BREVO_API_KEY")
-    if not brevo_key:
-        print(f"[WARN] BREVO_API_KEY manquant — email non envoyé à {to_email}")
+    resend_key = os.getenv("RESEND_API_KEY")
+    if not resend_key:
+        print(f"[WARN] RESEND_API_KEY manquant — email non envoyé à {to_email}")
         return
     try:
         first_name = name.split()[0] if name else "Coach"
         payload = {
-            "sender":     { "name": "InsightBall", "email": "contact@insightball.com" },
-            "to":         [{ "email": to_email, "name": name }],
-            "subject":    f"Votre essai InsightBall se termine bientôt",
-            "htmlContent": f"""
+            "from":    "InsightBall <contact@insightball.com>",
+            "to":      [to_email],
+            "subject": "Votre essai InsightBall se termine dans 2 jours",
+            "html": f"""
             <div style="font-family: monospace; max-width: 520px; margin: 0 auto; padding: 32px 24px; background: #faf8f4;">
               <div style="font-size: 22px; font-weight: 900; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 24px;">
                 INSIGHT<span style="color: #c9a227;">BALL</span>
@@ -59,13 +59,13 @@ def _send_trial_reminder_email(to_email: str, name: str, debit_date: str):
             """,
         }
         resp = httpx.post(
-            "https://api.brevo.com/v3/smtp/email",
+            "https://api.resend.com/emails",
             json=payload,
-            headers={"api-key": brevo_key, "Content-Type": "application/json"},
+            headers={"Authorization": f"Bearer {resend_key}", "Content-Type": "application/json"},
             timeout=10,
         )
         if resp.status_code not in (200, 201):
-            print(f"[WARN] Brevo email failed {resp.status_code}: {resp.text}")
+            print(f"[WARN] Resend email failed {resp.status_code}: {resp.text}")
         else:
             print(f"[INFO] Rappel trial envoyé à {to_email}")
     except Exception as e:
