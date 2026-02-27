@@ -13,6 +13,64 @@ router = APIRouter()
 
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 
+# ─────────────────────────────────────────────
+# EMAIL HELPER — Brevo (SendinBlue)
+# ─────────────────────────────────────────────
+def _send_trial_reminder_email(to_email: str, name: str, debit_date: str):
+    """
+    Envoie l'email de rappel J-2 avant fin trial via Brevo API.
+    Nécessite BREVO_API_KEY dans les variables d'environnement Render.
+    """
+    import httpx
+    brevo_key = os.getenv("BREVO_API_KEY")
+    if not brevo_key:
+        print(f"[WARN] BREVO_API_KEY manquant — email non envoyé à {to_email}")
+        return
+    try:
+        first_name = name.split()[0] if name else "Coach"
+        payload = {
+            "sender":     { "name": "InsightBall", "email": "contact@insightball.com" },
+            "to":         [{ "email": to_email, "name": name }],
+            "subject":    f"Votre essai InsightBall se termine bientôt",
+            "htmlContent": f"""
+            <div style="font-family: monospace; max-width: 520px; margin: 0 auto; padding: 32px 24px; background: #faf8f4;">
+              <div style="font-size: 22px; font-weight: 900; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 24px;">
+                INSIGHT<span style="color: #c9a227;">BALL</span>
+              </div>
+              <p style="font-size: 15px; color: #2a2a26; line-height: 1.6;">Bonjour {first_name},</p>
+              <p style="font-size: 14px; color: #2a2a26; line-height: 1.7;">
+                Votre essai gratuit se termine dans <strong>2 jours</strong>.<br>
+                Votre carte bancaire sera débitée le <strong>{debit_date}</strong> sauf résiliation avant cette date.
+              </p>
+              <div style="background: #fff; border: 1px solid rgba(15,15,13,0.09); border-left: 3px solid #c9a227; padding: 14px 18px; margin: 20px 0;">
+                <p style="font-size: 12px; color: rgba(15,15,13,0.55); margin: 0; line-height: 1.6;">
+                  Pour annuler : connectez-vous sur insightball.com → Paramètres → Gérer mon abonnement.<br>
+                  Aucune question posée, résiliation en 1 clic.
+                </p>
+              </div>
+              <a href="https://insightball.com/dashboard/settings" style="display: inline-block; padding: 12px 24px; background: #c9a227; color: #0f0f0d; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; font-weight: 700; text-decoration: none; margin-top: 8px;">
+                Gérer mon abonnement →
+              </a>
+              <p style="font-size: 11px; color: rgba(15,15,13,0.35); margin-top: 28px; line-height: 1.6;">
+                InsightBall · contact@insightball.com<br>
+                Vous recevez cet email car vous avez démarré un essai InsightBall.
+              </p>
+            </div>
+            """,
+        }
+        resp = httpx.post(
+            "https://api.brevo.com/v3/smtp/email",
+            json=payload,
+            headers={"api-key": brevo_key, "Content-Type": "application/json"},
+            timeout=10,
+        )
+        if resp.status_code not in (200, 201):
+            print(f"[WARN] Brevo email failed {resp.status_code}: {resp.text}")
+        else:
+            print(f"[INFO] Rappel trial envoyé à {to_email}")
+    except Exception as e:
+        print(f"[ERR] Email reminder failed: {e}")
+
 # 26a0Fe0f  COACH: 39 20ac/mois  |  Mettre 00e0 jour dans Render > Environment Variables
 STRIPE_PRICE_COACH = os.getenv("STRIPE_PRICE_COACH", "price_coach_39")
 # 26a0Fe0f  CLUB : 129 20ac/mois  |  Mettre 00e0 jour dans Render > Environment Variables
@@ -250,11 +308,19 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             user.is_active = True
             db.commit()
 
-    # ── Trial démarré
+    # ── J-3 avant fin trial — rappel email automatique
     elif event['type'] == 'customer.subscription.trial_will_end':
-        # J-3 avant fin trial — Stripe envoie cet event
-        # TODO : envoyer email de rappel via Brevo
-        pass
+        subscription = event['data']['object']
+        user = db.query(User).filter(
+            User.stripe_customer_id == subscription['customer']
+        ).first()
+        if user:
+            trial_end_ts = subscription.get('trial_end')
+            if trial_end_ts:
+                from datetime import timezone
+                trial_end_dt = datetime.fromtimestamp(trial_end_ts, tz=timezone.utc)
+                debit_date   = trial_end_dt.strftime('%d %B %Y')
+                _send_trial_reminder_email(user.email, user.name, debit_date)
 
     # ── Abonnement actif après trial (premier prélèvement réussi)
     elif event['type'] == 'invoice.payment_succeeded':
