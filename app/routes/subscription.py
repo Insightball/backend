@@ -192,12 +192,18 @@ async def confirm_plan(
 
         # Mettre à jour en base
         from app.models.user import PlanType
+        from datetime import datetime, timezone, timedelta
         try:
             current_user.plan = PlanType(data.plan.upper())
         except ValueError:
             current_user.plan = PlanType.COACH
         current_user.stripe_subscription_id = subscription.id
         current_user.is_active = True
+        # Stocker la date de fin de trial en base pour le quota check
+        if subscription.trial_end:
+            current_user.trial_ends_at = datetime.fromtimestamp(
+                subscription.trial_end, tz=timezone.utc
+            ).replace(tzinfo=None)
         db.commit()
 
         return {
@@ -443,6 +449,7 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
         user = db.query(User).filter(User.id == user_id).first()
         if user:
             from app.models.user import PlanType
+            from datetime import datetime, timezone
             try:
                 user.plan = PlanType(plan_str)
             except ValueError:
@@ -450,6 +457,17 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             user.stripe_subscription_id = session.get('subscription')
             user.stripe_customer_id     = session.get('customer') or user.stripe_customer_id
             user.is_active = True
+            # Récupérer trial_end depuis le sub Stripe
+            sub_id = session.get('subscription')
+            if sub_id:
+                try:
+                    sub = stripe.Subscription.retrieve(sub_id)
+                    if sub.trial_end:
+                        user.trial_ends_at = datetime.fromtimestamp(
+                            sub.trial_end, tz=timezone.utc
+                        ).replace(tzinfo=None)
+                except Exception:
+                    pass
             db.commit()
 
     # ── J-3 avant fin trial — email de rappel automatique via Resend
@@ -505,6 +523,14 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
         ).first()
         if user:
             user.is_active = subscription['status'] in ('active', 'trialing')
+            # Mettre à jour le plan si présent dans les metadata
+            plan_str = subscription.get('metadata', {}).get('plan', '').upper()
+            if plan_str in ('COACH', 'CLUB'):
+                from app.models.user import PlanType
+                try:
+                    user.plan = PlanType(plan_str)
+                except ValueError:
+                    pass
             db.commit()
 
     return {"status": "success"}
@@ -522,6 +548,72 @@ async def use_trial_match(
     db.commit()
     return {"success": True}
 
+
+
+
+# ─────────────────────────────────────────────
+# UPGRADE PLAN
+# Pendant trial → prélève immédiatement (trial_end='now')
+# Après trial   → prorata fin de période
+# ─────────────────────────────────────────────
+class UpgradePlanData(BaseModel):
+    plan: str  # "CLUB" uniquement (on ne downgrade pas)
+
+@router.post("/upgrade-plan")
+async def upgrade_plan(
+    data: UpgradePlanData,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Upgrade COACH → CLUB.
+    Si trialing : trial_end='now' → prélevé immédiatement.
+    Si active   : prorata sur la période en cours.
+    """
+    if not current_user.stripe_subscription_id:
+        raise HTTPException(status_code=400, detail="No active subscription")
+
+    new_price_id = _plan_to_price(data.plan)
+
+    try:
+        sub = stripe.Subscription.retrieve(current_user.stripe_subscription_id)
+        sub_dict = sub.to_dict() if hasattr(sub, 'to_dict') else dict(sub)
+        item_id = sub_dict['items']['data'][0]['id']
+
+        if sub_dict['status'] == 'trialing':
+            # Upgrade pendant trial → stopper le trial, prélever maintenant
+            updated_sub = stripe.Subscription.modify(
+                current_user.stripe_subscription_id,
+                items=[{'id': item_id, 'price': new_price_id}],
+                trial_end='now',
+                proration_behavior='none',
+                metadata={'user_id': str(current_user.id), 'plan': data.plan.upper()},
+            )
+        else:
+            # Upgrade normal → prorata
+            updated_sub = stripe.Subscription.modify(
+                current_user.stripe_subscription_id,
+                items=[{'id': item_id, 'price': new_price_id}],
+                proration_behavior='create_prorations',
+                metadata={'user_id': str(current_user.id), 'plan': data.plan.upper()},
+            )
+
+        # Mettre à jour en base immédiatement
+        from app.models.user import PlanType
+        try:
+            current_user.plan = PlanType(data.plan.upper())
+        except ValueError:
+            pass
+        db.commit()
+
+        return {
+            "success": True,
+            "plan": data.plan.upper(),
+            "status": updated_sub.status if hasattr(updated_sub, 'status') else updated_sub.get('status'),
+        }
+
+    except stripe.error.StripeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 # ─────────────────────────────────────────────
 # ANNULATION (cancel_at_period_end)

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Optional
 import uuid
 
@@ -19,7 +19,6 @@ PLAN_QUOTAS = {
 }
 
 TRIAL_MATCH_LIMIT = 1   # 1 match gratuit
-TRIAL_DAY_LIMIT   = 7   # 7 jours max
 
 
 # ─────────────────────────────────────────────
@@ -55,35 +54,25 @@ def check_and_consume_quota(user: User, db: Session) -> None:
             detail="NO_ACTIVE_PLAN"
         )
 
-    # ── Cas TRIAL ──────────────────────────────────────
-    # Un user sans abonnement actif a droit à :
-    #   - 1 match gratuit (trial_match_used)
-    #   - ET une fenêtre de 7 jours (trial_ends_at)
-    # La première condition atteinte bloque.
+    # ── Pas de CB → bloqué (sécurité back, front bloque déjà) ────
     if not user.stripe_subscription_id:
-        now = datetime.utcnow()
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail="NO_SUBSCRIPTION"
+        )
 
-        # Initialiser trial_ends_at à la première visite
-        if user.trial_ends_at is None:
-            user.trial_ends_at = now + timedelta(days=TRIAL_DAY_LIMIT)
-            db.flush()
-
-        # Condition 1 : match déjà consommé
+    # ── Cas TRIAL (sub Stripe en trialing) ────────────
+    # On détecte le trial via trial_ends_at en base (peuplé par confirm-plan)
+    # Si trial_ends_at > now → user en période d'essai → 1 match max
+    now = datetime.utcnow()
+    if user.trial_ends_at and now < user.trial_ends_at:
         if user.trial_match_used:
             raise HTTPException(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
                 detail="TRIAL_EXHAUSTED"
             )
-
-        # Condition 2 : période expirée
-        if now > user.trial_ends_at:
-            raise HTTPException(
-                status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                detail="TRIAL_EXPIRED"
-            )
-
-        # OK — consommer le match trial
         user.trial_match_used = True
+        db.commit()
         return
 
     # ── Cas CLUB : quota mensuel 12 ───────────────────
@@ -239,18 +228,13 @@ async def get_quota_status(
     Retourne l'état du quota pour le mois courant.
     Utile pour afficher la jauge dans le dashboard.
     """
-    # Trial
+    # Trial — source de vérité = Stripe pour la période, local pour le match
     if not current_user.stripe_subscription_id:
-        now = datetime.utcnow()
-        trial_ends = current_user.trial_ends_at
-        days_left = max(0, (trial_ends - now).days) if trial_ends else TRIAL_DAY_LIMIT
         return {
             "plan": "TRIAL",
             "quota": TRIAL_MATCH_LIMIT,
             "used": 1 if current_user.trial_match_used else 0,
             "remaining": 0 if current_user.trial_match_used else 1,
-            "trial_ends_at": trial_ends.isoformat() + "Z" if trial_ends else None,
-            "trial_days_left": days_left,
             "resets_at": None,
         }
 
