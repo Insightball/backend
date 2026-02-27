@@ -85,6 +85,131 @@ class PortalSessionCreate(BaseModel):
     return_url: str
 
 # ─────────────────────────────────────────────
+# CB ENREGISTRÉE ? — vérifie avant upload
+# ─────────────────────────────────────────────
+@router.get("/has-payment-method")
+async def has_payment_method(
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Retourne si l'user a une CB enregistrée dans Stripe.
+    Utilisé par UploadMatch pour bloquer l'accès si pas de CB.
+    """
+    if not current_user.stripe_customer_id:
+        return {"has_payment_method": False}
+    try:
+        methods = stripe.PaymentMethod.list(
+            customer=current_user.stripe_customer_id,
+            type="card",
+        )
+        return {"has_payment_method": len(methods.data) > 0}
+    except stripe.error.StripeError:
+        return {"has_payment_method": False}
+
+
+# ─────────────────────────────────────────────
+# SETUP INTENT — Stripe Elements sans redirection
+# ─────────────────────────────────────────────
+@router.post("/create-setup-intent")
+async def create_setup_intent(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Crée un SetupIntent Stripe pour enregistrer la CB sans débit immédiat.
+    Le frontend utilise Stripe Elements avec ce client_secret.
+    """
+    try:
+        # Créer customer si nécessaire
+        if not current_user.stripe_customer_id:
+            customer = stripe.Customer.create(
+                email=current_user.email,
+                metadata={"user_id": str(current_user.id), "name": current_user.name}
+            )
+            current_user.stripe_customer_id = customer.id
+            db.commit()
+
+        setup_intent = stripe.SetupIntent.create(
+            customer=current_user.stripe_customer_id,
+            payment_method_types=["card"],
+            metadata={"user_id": str(current_user.id)},
+        )
+        return {
+            "client_secret": setup_intent.client_secret,
+            "customer_id": current_user.stripe_customer_id,
+        }
+    except stripe.error.StripeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ─────────────────────────────────────────────
+# CONFIRM PLAN — après SetupIntent confirmé
+# Active l'abonnement avec trial 7j
+# ─────────────────────────────────────────────
+class ConfirmPlanData(BaseModel):
+    plan: str
+    payment_method_id: str
+
+@router.post("/confirm-plan")
+async def confirm_plan(
+    data: ConfirmPlanData,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Après que l'user a entré sa CB via Elements,
+    on attache la PM et on crée l'abonnement avec trial 7j.
+    """
+    try:
+        if data.plan.upper() == "COACH":
+            price_id = STRIPE_PRICE_COACH
+        elif data.plan.upper() == "CLUB":
+            price_id = STRIPE_PRICE_CLUB
+        else:
+            raise HTTPException(status_code=400, detail="Invalid plan")
+
+        if not current_user.stripe_customer_id:
+            raise HTTPException(status_code=400, detail="No customer ID")
+
+        # Attacher la PM au customer
+        stripe.PaymentMethod.attach(
+            data.payment_method_id,
+            customer=current_user.stripe_customer_id,
+        )
+        # Définir comme PM par défaut
+        stripe.Customer.modify(
+            current_user.stripe_customer_id,
+            invoice_settings={"default_payment_method": data.payment_method_id},
+        )
+        # Créer l'abonnement avec trial 7j
+        subscription = stripe.Subscription.create(
+            customer=current_user.stripe_customer_id,
+            items=[{"price": price_id}],
+            trial_period_days=7,
+            default_payment_method=data.payment_method_id,
+            metadata={"user_id": str(current_user.id), "plan": data.plan.upper()},
+        )
+
+        # Mettre à jour en base
+        from app.models.user import PlanType
+        try:
+            current_user.plan = PlanType(data.plan.upper())
+        except ValueError:
+            current_user.plan = PlanType.COACH
+        current_user.stripe_subscription_id = subscription.id
+        current_user.is_active = True
+        db.commit()
+
+        return {
+            "success": True,
+            "subscription_id": subscription.id,
+            "status": subscription.status,
+            "trial_end": subscription.trial_end,
+        }
+    except stripe.error.StripeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+# ─────────────────────────────────────────────
 # CHECKOUT — Trial 7 jours avec CB requise
 # ─────────────────────────────────────────────
 @router.post("/create-checkout-session")
