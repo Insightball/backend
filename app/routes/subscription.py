@@ -45,6 +45,25 @@ def _resend_post(resend_key: str, payload: dict) -> int:
 def _plan_value(user):
     return user.plan.value if hasattr(user.plan, 'value') else user.plan
 
+
+def _sync_billing_period(user, subscription):
+    """
+    Synchronise current_period_start/end depuis l'objet Stripe subscription.
+    Appelé dans les webhooks pour garder la base alignée avec Stripe.
+    Timestamps Stripe (epoch) → UTC naive en base.
+    """
+    period_start = subscription.get('current_period_start')
+    period_end = subscription.get('current_period_end')
+    if period_start:
+        user.current_period_start = datetime.fromtimestamp(
+            period_start, tz=timezone.utc
+        ).replace(tzinfo=None)
+    if period_end:
+        user.current_period_end = datetime.fromtimestamp(
+            period_end, tz=timezone.utc
+        ).replace(tzinfo=None)
+
+
 def _send_trial_welcome_email(to_email: str, name: str, trial_end: int):
     """Email de bienvenue apres activation du trial. Non bloquant."""
     resend_key = os.getenv("RESEND_API_KEY")
@@ -217,7 +236,7 @@ async def create_setup_intent(
 
 # ─────────────────────────────────────────────
 # CONFIRM PLAN — après SetupIntent confirmé
-# Active l'abonnement avec trial 7j (Coach ET Club)
+# Active l'abonnement avec trial 7j (Coach uniquement)
 # L'essai démarre ICI — pas à l'inscription
 # ─────────────────────────────────────────────
 @router.post("/confirm-plan")
@@ -273,6 +292,9 @@ async def confirm_plan(
             current_user.trial_ends_at = datetime.fromtimestamp(
                 subscription.trial_end, tz=timezone.utc
             ).replace(tzinfo=None)
+        # Sync billing period
+        sub_dict = subscription.to_dict() if hasattr(subscription, 'to_dict') else dict(subscription)
+        _sync_billing_period(current_user, sub_dict)
         db.commit()
 
         # Email de bienvenue — trial activé (non bloquant)
@@ -377,58 +399,31 @@ async def get_trial_status(
                 days_left = 0
                 if trial_end_ts and status == 'trialing':
                     trial_end_dt = datetime.fromtimestamp(trial_end_ts, tz=timezone.utc)
-                    days_left = max(0, (trial_end_dt - now).days)
+                    delta = trial_end_dt - now
+                    days_left = max(0, delta.days)
+
                 return {
                     "access": "full",
-                    "status": status,
                     "trial_active": status == 'trialing',
                     "days_left": days_left,
-                    "trial_ends_at": trial_end_ts,
-                    "match_used": getattr(current_user, 'trial_match_used', False),
+                    "match_used": current_user.trial_match_used or False,
                     "plan": _plan_value(current_user),
+                    "cancel_at_period_end": sub_dict.get('cancel_at_period_end', False),
                 }
-            else:
-                return {
-                    "access": "expired",
-                    "trial_active": False,
-                    "days_left": 0,
-                    "match_used": getattr(current_user, 'trial_match_used', False),
-                    "plan": None,
-                }
+
+            # Sub existe mais pas active/trialing → expired
+            return {
+                "access": "expired",
+                "trial_active": False,
+                "days_left": 0,
+                "match_used": current_user.trial_match_used or False,
+                "plan": _plan_value(current_user),
+            }
+
         except stripe.error.StripeError:
             pass
 
-    # Pas de sub Stripe → vérifier si customer avec sub actif
-    if current_user.stripe_customer_id:
-        try:
-            subs = stripe.Subscription.list(
-                customer=current_user.stripe_customer_id,
-                limit=1
-            )
-            if subs.data:
-                sub = subs.data[0]
-                if sub.status in ('active', 'trialing'):
-                    # Mettre à jour subscription_id en base
-                    current_user.stripe_subscription_id = sub.id
-                    db.commit()
-                    trial_end_ts = sub.trial_end
-                    days_left = 0
-                    if trial_end_ts and sub.status == 'trialing':
-                        trial_end_dt = datetime.fromtimestamp(trial_end_ts, tz=timezone.utc)
-                        days_left = max(0, (trial_end_dt - now).days)
-                    return {
-                        "access": "full",
-                        "status": sub.status,
-                        "trial_active": sub.status == 'trialing',
-                        "days_left": days_left,
-                        "trial_ends_at": trial_end_ts,
-                        "match_used": getattr(current_user, 'trial_match_used', False),
-                        "plan": _plan_value(current_user),
-                    }
-        except stripe.error.StripeError:
-            pass
-
-    # Aucun sub, aucune CB → pas encore d'essai
+    # Pas de sub Stripe
     return {
         "access": "no_trial",
         "trial_active": False,
@@ -543,15 +538,17 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             user.stripe_subscription_id = session.get('subscription')
             user.stripe_customer_id     = session.get('customer') or user.stripe_customer_id
             user.is_active = True
-            # Récupérer trial_end depuis le sub Stripe (UTC naive)
+            # Récupérer trial_end + billing period depuis le sub Stripe
             sub_id = session.get('subscription')
             if sub_id:
                 try:
                     sub = stripe.Subscription.retrieve(sub_id)
+                    sub_dict = sub.to_dict() if hasattr(sub, 'to_dict') else dict(sub)
                     if sub.trial_end:
                         user.trial_ends_at = datetime.fromtimestamp(
                             sub.trial_end, tz=timezone.utc
                         ).replace(tzinfo=None)
+                    _sync_billing_period(user, sub_dict)
                 except Exception:
                     pass
             db.commit()
@@ -569,7 +566,7 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                 debit_date   = trial_end_dt.strftime('%d %B %Y')
                 _send_trial_reminder_email(user.email, user.name, debit_date)
 
-    # ── Premier prélèvement réussi après trial
+    # ── Premier prélèvement réussi après trial / renouvellement mensuel
     elif event['type'] == 'invoice.payment_succeeded':
         invoice = event['data']['object']
         if invoice.get('billing_reason') in ('subscription_cycle', 'subscription_create'):
@@ -578,6 +575,15 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             ).first()
             if user:
                 user.is_active = True
+                # Sync billing period au renouvellement
+                sub_id = invoice.get('subscription')
+                if sub_id:
+                    try:
+                        sub = stripe.Subscription.retrieve(sub_id)
+                        sub_dict = sub.to_dict() if hasattr(sub, 'to_dict') else dict(sub)
+                        _sync_billing_period(user, sub_dict)
+                    except Exception:
+                        pass
                 db.commit()
 
     # ── Paiement échoué
@@ -602,7 +608,7 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             db.commit()
 
     # ── Abonnement mis à jour (trialing → active, upgrade, cancel_at_period_end)
-    # FIX P0 — C'est ici la source de vérité pour le plan, pas dans upgrade-plan
+    # Source de vérité pour le plan + billing period
     elif event['type'] == 'customer.subscription.updated':
         subscription = event['data']['object']
         user = db.query(User).filter(
@@ -618,10 +624,11 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                     user.plan = PlanType(plan_str)
                 except ValueError:
                     pass
+            # Sync billing period à chaque mise à jour
+            _sync_billing_period(user, subscription)
             # FIX — quand le sub passe de trialing → active (end-trial),
             # on écrase trial_ends_at avec now() pour que get_quota_status
             # bascule immédiatement sur le quota mensuel plan (4 matchs COACH)
-            # sans attendre l'expiration naturelle de trial_ends_at
             if new_status == 'active' and user.trial_ends_at:
                 prev_status = event['data'].get('previous_attributes', {}).get('status')
                 if prev_status == 'trialing':

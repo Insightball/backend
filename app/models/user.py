@@ -43,6 +43,12 @@ class User(Base):
     trial_match_used = Column(Boolean, default=False)
     trial_ends_at = Column(DateTime, nullable=True)
 
+    # Billing cycle — source de vérité pour le comptage quota mensuel
+    # Peuplé via webhooks Stripe (subscription.updated, invoice.payment_succeeded)
+    # UTC naive — même convention que trial_ends_at
+    current_period_start = Column(DateTime, nullable=True)
+    current_period_end = Column(DateTime, nullable=True)
+
     # Profile perso (onboarding)
     profile_role = Column(String, nullable=True)      # Éducateur, Entraîneur...
     profile_level = Column(String, nullable=True)     # National, Régional...

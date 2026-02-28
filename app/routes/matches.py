@@ -25,8 +25,14 @@ TRIAL_MATCH_LIMIT = 1   # 1 match gratuit
 # HELPERS QUOTA
 # ─────────────────────────────────────────────
 
-def get_current_month_range():
-    """Retourne le début et la fin du mois courant en UTC."""
+def get_billing_period(user: User):
+    """
+    Retourne (start, end) du cycle de facturation Stripe.
+    Peuplé via webhooks — si absent, fallback sur mois calendaire.
+    """
+    if user.current_period_start and user.current_period_end:
+        return user.current_period_start, user.current_period_end
+    # Fallback mois calendaire (ne devrait pas arriver en prod)
     now = datetime.utcnow()
     start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     if now.month == 12:
@@ -39,14 +45,14 @@ def get_current_month_range():
 def check_and_consume_quota(user: User, db: Session) -> None:
     """
     Vérifie que l'utilisateur peut créer un nouveau match.
-    Lève une HTTPException 402/429 si le quota est dépassé.
+    Lève une HTTPException 402 si le quota est dépassé.
 
     Ordre de priorité STRICT :
     1. Superadmin → pas de quota
     2. Pas de plan → bloqué
-    3. stripe_subscription_id présent ET trial_ends_at futur → 1 match trial (CB enregistrée mais trial pas fini)
-    4. stripe_subscription_id présent ET trial expiré → quota mensuel plan (COACH/CLUB)
-    5. Pas de stripe_subscription_id + trial_ends_at futur → 1 match trial (edge case)
+    3. stripe_subscription_id présent ET trial_ends_at futur → 1 match trial
+    4. stripe_subscription_id présent ET trial expiré → quota cycle Stripe
+    5. Pas de stripe_subscription_id + trial_ends_at futur → 1 match trial
     6. Sinon → NO_SUBSCRIPTION
     """
     # 1. Superadmin
@@ -61,13 +67,11 @@ def check_and_consume_quota(user: User, db: Session) -> None:
         )
 
     # 3. ── Abonnement Stripe actif ────────────────────────────────────
-    # Si stripe_subscription_id présent MAIS encore en trial → logique trial (1 match)
     if user.stripe_subscription_id:
         now = datetime.utcnow()
         if user.trial_ends_at and now < user.trial_ends_at:
             # Encore en trial — 1 match offert
             if user.trial_match_used:
-                # Match trial déjà utilisé → bloquer, pas basculer sur quota mensuel
                 raise HTTPException(
                     status_code=status.HTTP_402_PAYMENT_REQUIRED,
                     detail="TRIAL_EXHAUSTED"
@@ -85,51 +89,28 @@ def check_and_consume_quota(user: User, db: Session) -> None:
                 )
             return
 
-        if user.plan == PlanType.CLUB:
-            quota = PLAN_QUOTAS[PlanType.CLUB]
-            start, end = get_current_month_range()
-            club_id = _get_solo_club_id(user, db)
-            trial_cutoff = user.trial_ends_at or start
-            count = db.query(Match).filter(
-                Match.club_id == club_id,
-                Match.created_at >= start,
-                Match.created_at < end,
-                Match.created_at >= trial_cutoff,  # match trial exclu
-            ).count()
-            if count >= quota:
-                raise HTTPException(
-                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                    detail={
-                        "code": "QUOTA_EXCEEDED",
-                        "plan": "CLUB",
-                        "quota": quota,
-                        "used": count,
-                        "resets_at": end.isoformat() + "Z",
-                        "message": f"Quota atteint ({quota} matchs/mois). Renouvellement le 1er du mois."
-                    }
-                )
-            return
-
-        # COACH (défaut)
-        quota = PLAN_QUOTAS[PlanType.COACH]
-        start, end = get_current_month_range()
+        # Trial expiré → quota cycle Stripe
+        quota = PLAN_QUOTAS.get(user.plan, PLAN_QUOTAS[PlanType.COACH])
+        start, end = get_billing_period(user)
+        club_id = _get_solo_club_id(user, db)
+        # Exclure le match trial : ne compter que les matchs créés après fin trial
         trial_cutoff = user.trial_ends_at or start
         count = db.query(Match).filter(
-            Match.club_id == _get_solo_club_id(user, db),
+            Match.club_id == club_id,
             Match.created_at >= start,
             Match.created_at < end,
-            Match.created_at >= trial_cutoff,  # match trial exclu
+            Match.created_at >= trial_cutoff,
         ).count()
         if count >= quota:
             raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
                 detail={
                     "code": "QUOTA_EXCEEDED",
-                    "plan": "COACH",
+                    "plan": user.plan.value if hasattr(user.plan, 'value') else user.plan,
                     "quota": quota,
                     "used": count,
                     "resets_at": end.isoformat() + "Z",
-                    "message": f"Quota atteint ({quota} matchs/mois). Ton quota se renouvelle le 1er du mois prochain."
+                    "message": f"Quota atteint ({quota} matchs). Renouvellement le {end.strftime('%d/%m/%Y')}."
                 }
             )
         return
@@ -236,17 +217,8 @@ async def get_quota_status(
 ):
     """
     Source de vérité pour le quota affiché dans le dashboard.
-
-    Priorité :
-    1. stripe_subscription_id présent :
-       a. trial_ends_at futur → TRIAL (0 ou 1 selon trial_match_used)
-       b. sinon → quota mensuel plan (COACH=4 / CLUB=12)
-    2. Pas de stripe_subscription_id :
-       a. trial_ends_at futur → TRIAL (0 ou 1 selon trial_match_used)
-       b. sinon → NO_SUBSCRIPTION (0/0)
-
-    Règle clé : pendant le trial, on affiche TOUJOURS le quota trial (1 match max),
-    même si trial_match_used=True. Le quota mensuel ne s'affiche qu'après end-trial.
+    Utilise le cycle de facturation Stripe (current_period_start/end),
+    pas le mois calendaire.
     """
     now = datetime.utcnow()
 
@@ -257,7 +229,6 @@ async def get_quota_status(
             and now < current_user.trial_ends_at
         )
         if is_trialing:
-            # Encore en trial → afficher quota trial (0 ou 1), jamais quota mensuel
             return {
                 "plan": "TRIAL",
                 "quota": TRIAL_MATCH_LIMIT,
@@ -266,39 +237,20 @@ async def get_quota_status(
                 "resets_at": None,
             }
 
-        if current_user.plan == PlanType.CLUB:
-            quota = PLAN_QUOTAS[PlanType.CLUB]
-            start, end = get_current_month_range()
-            club_id = _get_solo_club_id(current_user, db)
-            trial_cutoff = current_user.trial_ends_at or start
-            used = db.query(Match).filter(
-                Match.club_id == club_id,
-                Match.created_at >= start,
-                Match.created_at < end,
-                Match.created_at >= trial_cutoff,  # match trial exclu
-            ).count()
-            return {
-                "plan": "CLUB",
-                "quota": quota,
-                "used": used,
-                "remaining": max(0, quota - used),
-                "resets_at": end.isoformat() + "Z",
-            }
-
-        # COACH (défaut)
-        quota = PLAN_QUOTAS[PlanType.COACH]
-        start, end = get_current_month_range()
+        # Quota cycle Stripe
+        quota = PLAN_QUOTAS.get(current_user.plan, PLAN_QUOTAS[PlanType.COACH])
+        start, end = get_billing_period(current_user)
         club_id = _get_solo_club_id(current_user, db)
-        # Exclure le match trial : ne compter que les matchs créés après la fin du trial
         trial_cutoff = current_user.trial_ends_at or start
         used = db.query(Match).filter(
             Match.club_id == club_id,
             Match.created_at >= start,
             Match.created_at < end,
-            Match.created_at >= trial_cutoff,  # match trial exclu
+            Match.created_at >= trial_cutoff,
         ).count()
+        plan_label = current_user.plan.value if hasattr(current_user.plan, 'value') else current_user.plan
         return {
-            "plan": "COACH",
+            "plan": plan_label,
             "quota": quota,
             "used": used,
             "remaining": max(0, quota - used),
