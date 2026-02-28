@@ -181,6 +181,8 @@ async def get_current_user_info(current_user: User = Depends(get_current_user)):
         profile_phone=current_user.profile_phone,
         profile_city=current_user.profile_city,
         profile_diploma=current_user.profile_diploma,
+        trial_ends_at=current_user.trial_ends_at.isoformat() if current_user.trial_ends_at else None,
+        trial_match_used=current_user.trial_match_used,
     )
 
 
