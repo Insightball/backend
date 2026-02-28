@@ -685,6 +685,60 @@ async def request_club_quote(
 
 
 # ─────────────────────────────────────────────
+# END TRIAL — Fin du trial immédiat, prélèvement 39€ maintenant
+# Appelé par le bouton "Confirmer plan Coach" pendant le trial
+# Le plan est mis à jour via webhook customer.subscription.updated uniquement
+# ─────────────────────────────────────────────
+@router.post("/end-trial")
+async def end_trial(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Termine le trial immédiatement → prélèvement 39€ maintenant.
+    Guard : uniquement si la subscription est en statut 'trialing'.
+    Pas de db.commit() — le plan est mis à jour via webhook customer.subscription.updated.
+    """
+    sub_id = current_user.stripe_subscription_id
+
+    # Fallback — même pattern que cancel-subscription
+    if not sub_id and current_user.stripe_customer_id:
+        try:
+            subs = stripe.Subscription.list(
+                customer=current_user.stripe_customer_id,
+                status='trialing',
+                limit=1
+            )
+            if subs.data:
+                sub_id = subs.data[0].id
+                current_user.stripe_subscription_id = sub_id
+                db.commit()
+        except stripe.error.StripeError:
+            pass
+
+    if not sub_id:
+        raise HTTPException(status_code=400, detail="No active subscription")
+
+    # Guard — vérifier que le sub est bien en trial avant de modifier
+    try:
+        subscription = stripe.Subscription.retrieve(sub_id)
+    except stripe.error.StripeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if subscription.status != 'trialing':
+        raise HTTPException(
+            status_code=400,
+            detail="Subscription is not in trial — use the billing portal to manage your plan"
+        )
+
+    try:
+        stripe.Subscription.modify(sub_id, trial_end='now')
+        return {"success": True}
+    except stripe.error.StripeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ─────────────────────────────────────────────
 # ANNULATION (cancel_at_period_end)
 # Fonctionne en trial ET en actif
 # ─────────────────────────────────────────────
