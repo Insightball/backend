@@ -30,6 +30,7 @@ def _plan_to_price(plan: str) -> str:
 def _resend_post(resend_key: str, payload: dict) -> int:
     """POST vers Resend API via urllib stdlib. Retourne le status HTTP."""
     import urllib.request
+    import urllib.error
     import json as _json
     data = _json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
@@ -38,8 +39,13 @@ def _resend_post(resend_key: str, payload: dict) -> int:
         headers={"Authorization": f"Bearer {resend_key}", "Content-Type": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=10) as r:
-        return r.status
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return r.status
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")
+        print(f"[ERR] Resend HTTP {e.code}: {body}")
+        return e.code
 
 
 def _plan_value(user):
