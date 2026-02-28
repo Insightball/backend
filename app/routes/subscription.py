@@ -609,7 +609,8 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             User.stripe_customer_id == subscription['customer']
         ).first()
         if user:
-            user.is_active = subscription['status'] in ('active', 'trialing')
+            new_status = subscription['status']
+            user.is_active = new_status in ('active', 'trialing')
             plan_str = subscription.get('metadata', {}).get('plan', '').upper()
             if plan_str in ('COACH', 'CLUB'):
                 from app.models.user import PlanType
@@ -617,6 +618,14 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                     user.plan = PlanType(plan_str)
                 except ValueError:
                     pass
+            # FIX — quand le sub passe de trialing → active (end-trial),
+            # on écrase trial_ends_at avec now() pour que get_quota_status
+            # bascule immédiatement sur le quota mensuel plan (4 matchs COACH)
+            # sans attendre l'expiration naturelle de trial_ends_at
+            if new_status == 'active' and user.trial_ends_at:
+                prev_status = event['data'].get('previous_attributes', {}).get('status')
+                if prev_status == 'trialing':
+                    user.trial_ends_at = datetime.utcnow()
             db.commit()
 
     return {"status": "success"}
