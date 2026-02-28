@@ -181,14 +181,18 @@ async def confirm_plan(
             current_user.stripe_customer_id,
             invoice_settings={"default_payment_method": data.payment_method_id},
         )
-        # Créer l'abonnement avec trial 7j — démarrage du compteur ici
-        subscription = stripe.Subscription.create(
+        # Trial 7j accordé UNIQUEMENT au plan COACH
+        # Le plan CLUB est vendu sur devis — pas de trial automatique
+        sub_params: dict = dict(
             customer=current_user.stripe_customer_id,
             items=[{"price": price_id}],
-            trial_period_days=7,
             default_payment_method=data.payment_method_id,
             metadata={"user_id": str(current_user.id), "plan": data.plan.upper()},
         )
+        if data.plan.upper() == "COACH" and not current_user.trial_ends_at:
+            sub_params["trial_period_days"] = 7
+
+        subscription = stripe.Subscription.create(**sub_params)
 
         # Mettre à jour en base
         from app.models.user import PlanType
@@ -237,12 +241,18 @@ async def create_checkout_session(
             current_user.stripe_customer_id = customer.id
             db.commit()
 
-        # FIX P0 — Ne pas accorder un second trial si l'user en a déjà eu un.
-        # trial_ends_at est peuplé dès le premier abonnement (confirm-plan ou checkout).
-        # Si ce champ est renseigné → trial déjà consommé → paiement immédiat.
+        # RÈGLE BUSINESS : le trial 7j est réservé au plan COACH uniquement.
+        # Le plan CLUB est vendu sur devis — il ne passe jamais par create-checkout-session.
+        if data.plan.upper() != "COACH":
+            raise HTTPException(
+                status_code=400,
+                detail="Le plan CLUB est disponible sur devis uniquement. Contactez contact@insightball.com"
+            )
+
+        # FIX P0 — Pas de second trial si l'user en a déjà eu un.
         already_trialed = current_user.trial_ends_at is not None
         subscription_data: dict = {
-            "metadata": {"user_id": str(current_user.id), "plan": data.plan.upper()}
+            "metadata": {"user_id": str(current_user.id), "plan": "COACH"}
         }
         if not already_trialed:
             subscription_data["trial_period_days"] = 7
@@ -540,67 +550,69 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
 
 
 # ─────────────────────────────────────────────
-# UPGRADE PLAN
-# Pendant trial → prélève immédiatement (trial_end='now')
-# Après trial   → prorata fin de période
-# FIX P0 — suppression du db.commit() optimiste
-# La mise à jour du plan se fait via webhook customer.subscription.updated
+# REQUEST CLUB QUOTE
+# Le plan CLUB est vendu sur devis — pas d'upgrade automatique.
+# Cet endpoint envoie un email de demande de devis via Resend.
+# Un admin contacte l'utilisateur et crée le sub manuellement depuis le dashboard Stripe.
 # ─────────────────────────────────────────────
-class UpgradePlanData(BaseModel):
-    plan: str  # "CLUB" uniquement (on ne downgrade pas)
+class ClubQuoteRequest(BaseModel):
+    message: str = ""  # Message optionnel du coach
 
-@router.post("/upgrade-plan")
-async def upgrade_plan(
-    data: UpgradePlanData,
+@router.post("/request-club-quote")
+async def request_club_quote(
+    data: ClubQuoteRequest,
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
 ):
     """
-    Upgrade COACH → CLUB.
-    Si trialing : trial_end='now' → prélevé immédiatement.
-    Si active   : prorata sur la période en cours.
-    Le plan en base est mis à jour via webhook customer.subscription.updated.
+    Envoie une demande de devis CLUB par email via Resend.
+    Pas de création de subscription Stripe — traitement manuel par l'équipe InsightBall.
     """
-    if not current_user.stripe_subscription_id:
-        raise HTTPException(status_code=400, detail="No active subscription")
+    import httpx
+    resend_key = os.getenv("RESEND_API_KEY")
+    if not resend_key:
+        raise HTTPException(status_code=500, detail="Service email non configuré")
 
-    new_price_id = _plan_to_price(data.plan)
+    plan_value = _plan_value(current_user)
+    profile_phone = getattr(current_user, 'profile_phone', '') or ''
+    profile_club  = getattr(current_user, 'profile_city', '') or ''
 
     try:
-        sub = stripe.Subscription.retrieve(current_user.stripe_subscription_id)
-        sub_dict = sub.to_dict() if hasattr(sub, 'to_dict') else dict(sub)
-        item_id = sub_dict['items']['data'][0]['id']
+        resp = httpx.post(
+            "https://api.resend.com/emails",
+            json={
+                "from":    "InsightBall <contact@insightball.com>",
+                "to":      ["contact@insightball.com"],
+                "subject": f"Demande de devis CLUB — {current_user.name}",
+                "html": f"""
+                <div style="font-family:monospace;max-width:520px;margin:0 auto;padding:32px 24px;background:#faf8f4;">
+                  <div style="font-size:22px;font-weight:900;text-transform:uppercase;letter-spacing:.04em;margin-bottom:24px;">
+                    INSIGHT<span style="color:#c9a227;">BALL</span> — Devis CLUB
+                  </div>
+                  <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                    <tr><td style="padding:6px 0;color:#888;width:120px;">Nom</td><td style="padding:6px 0;font-weight:700;">{current_user.name}</td></tr>
+                    <tr><td style="padding:6px 0;color:#888;">Email</td><td style="padding:6px 0;">{current_user.email}</td></tr>
+                    <tr><td style="padding:6px 0;color:#888;">Téléphone</td><td style="padding:6px 0;">{profile_phone or 'Non renseigné'}</td></tr>
+                    <tr><td style="padding:6px 0;color:#888;">Ville / Club</td><td style="padding:6px 0;">{profile_club or 'Non renseigné'}</td></tr>
+                    <tr><td style="padding:6px 0;color:#888;">Plan actuel</td><td style="padding:6px 0;">{plan_value}</td></tr>
+                    <tr><td style="padding:6px 0;color:#888;">User ID</td><td style="padding:6px 0;font-size:11px;">{current_user.id}</td></tr>
+                  </table>
+                  {f'<div style="margin-top:16px;padding:12px 16px;background:#fff;border-left:3px solid #c9a227;"><strong>Message :</strong><br>{data.message}</div>' if data.message else ''}
+                  <p style="margin-top:20px;font-size:11px;color:#aaa;">Répondre à : {current_user.email}</p>
+                </div>
+                """,
+                "reply_to": current_user.email,
+            },
+            headers={"Authorization": f"Bearer {resend_key}", "Content-Type": "application/json"},
+            timeout=10,
+        )
+        if resp.status_code not in (200, 201):
+            print(f"[WARN] Resend club quote failed {resp.status_code}: {resp.text}")
+            raise HTTPException(status_code=500, detail="Erreur envoi email")
 
-        if sub_dict['status'] == 'trialing':
-            # Upgrade pendant trial → stopper le trial, prélever maintenant
-            updated_sub = stripe.Subscription.modify(
-                current_user.stripe_subscription_id,
-                items=[{'id': item_id, 'price': new_price_id}],
-                trial_end='now',
-                proration_behavior='none',
-                metadata={'user_id': str(current_user.id), 'plan': data.plan.upper()},
-            )
-        else:
-            # Upgrade normal → prorata
-            updated_sub = stripe.Subscription.modify(
-                current_user.stripe_subscription_id,
-                items=[{'id': item_id, 'price': new_price_id}],
-                proration_behavior='create_prorations',
-                metadata={'user_id': str(current_user.id), 'plan': data.plan.upper()},
-            )
+        return {"success": True, "message": "Votre demande de devis a été envoyée. Nous vous contacterons sous 24h."}
 
-        # FIX P0 — PAS de db.commit() ici.
-        # Le plan sera mis à jour proprement via webhook customer.subscription.updated
-        # qui est la seule source de vérité pour l'état du plan en base.
-
-        return {
-            "success": True,
-            "plan": data.plan.upper(),
-            "status": updated_sub.status if hasattr(updated_sub, 'status') else updated_sub.get('status'),
-        }
-
-    except stripe.error.StripeError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=500, detail=f"Erreur réseau : {e}")
 
 
 # ─────────────────────────────────────────────
