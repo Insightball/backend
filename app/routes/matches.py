@@ -89,10 +89,12 @@ def check_and_consume_quota(user: User, db: Session) -> None:
             quota = PLAN_QUOTAS[PlanType.CLUB]
             start, end = get_current_month_range()
             club_id = _get_solo_club_id(user, db)
+            trial_cutoff = user.trial_ends_at or start
             count = db.query(Match).filter(
                 Match.club_id == club_id,
                 Match.created_at >= start,
                 Match.created_at < end,
+                Match.created_at >= trial_cutoff,  # match trial exclu
             ).count()
             if count >= quota:
                 raise HTTPException(
@@ -111,10 +113,12 @@ def check_and_consume_quota(user: User, db: Session) -> None:
         # COACH (défaut)
         quota = PLAN_QUOTAS[PlanType.COACH]
         start, end = get_current_month_range()
+        trial_cutoff = user.trial_ends_at or start
         count = db.query(Match).filter(
             Match.club_id == _get_solo_club_id(user, db),
             Match.created_at >= start,
             Match.created_at < end,
+            Match.created_at >= trial_cutoff,  # match trial exclu
         ).count()
         if count >= quota:
             raise HTTPException(
@@ -262,15 +266,16 @@ async def get_quota_status(
                 "resets_at": None,
             }
 
-        # Sub actif (ou trial épuisé/terminé) → quota mensuel plan
         if current_user.plan == PlanType.CLUB:
             quota = PLAN_QUOTAS[PlanType.CLUB]
             start, end = get_current_month_range()
             club_id = _get_solo_club_id(current_user, db)
+            trial_cutoff = current_user.trial_ends_at or start
             used = db.query(Match).filter(
                 Match.club_id == club_id,
                 Match.created_at >= start,
                 Match.created_at < end,
+                Match.created_at >= trial_cutoff,  # match trial exclu
             ).count()
             return {
                 "plan": "CLUB",
@@ -284,10 +289,13 @@ async def get_quota_status(
         quota = PLAN_QUOTAS[PlanType.COACH]
         start, end = get_current_month_range()
         club_id = _get_solo_club_id(current_user, db)
+        # Exclure le match trial : ne compter que les matchs créés après la fin du trial
+        trial_cutoff = current_user.trial_ends_at or start
         used = db.query(Match).filter(
             Match.club_id == club_id,
             Match.created_at >= start,
             Match.created_at < end,
+            Match.created_at >= trial_cutoff,  # match trial exclu
         ).count()
         return {
             "plan": "COACH",
