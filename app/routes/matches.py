@@ -223,8 +223,74 @@ async def get_quota_status(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # Trial actif : avec OU sans stripe_subscription_id
+    """
+    Source de vérité pour le quota affiché dans le dashboard.
+
+    Priorité :
+    1. stripe_subscription_id présent :
+       a. trial_ends_at futur ET trial_match_used False → TRIAL (1 match)
+       b. sinon → quota mensuel plan (COACH=4 / CLUB=12)
+    2. Pas de stripe_subscription_id :
+       a. trial_ends_at futur → TRIAL (1 match)
+       b. sinon → NO_SUBSCRIPTION (0/0)
+
+    Règle clé : trial_ends_at dans le futur NE signifie PAS que l'user est en trial
+    si stripe_subscription_id est présent — il peut avoir activé son plan (end-trial).
+    """
     now = datetime.utcnow()
+
+    # ── Abonnement Stripe présent ──────────────────────────────────────
+    if current_user.stripe_subscription_id:
+        in_trial = (
+            current_user.trial_ends_at is not None
+            and now < current_user.trial_ends_at
+            and not current_user.trial_match_used
+        )
+        if in_trial:
+            return {
+                "plan": "TRIAL",
+                "quota": TRIAL_MATCH_LIMIT,
+                "used": 0,
+                "remaining": 1,
+                "resets_at": None,
+            }
+
+        # Sub actif (ou trial épuisé/terminé) → quota mensuel plan
+        if current_user.plan == PlanType.CLUB:
+            quota = PLAN_QUOTAS[PlanType.CLUB]
+            start, end = get_current_month_range()
+            club_id = _get_solo_club_id(current_user, db)
+            used = db.query(Match).filter(
+                Match.club_id == club_id,
+                Match.created_at >= start,
+                Match.created_at < end,
+            ).count()
+            return {
+                "plan": "CLUB",
+                "quota": quota,
+                "used": used,
+                "remaining": max(0, quota - used),
+                "resets_at": end.isoformat() + "Z",
+            }
+
+        # COACH (défaut)
+        quota = PLAN_QUOTAS[PlanType.COACH]
+        start, end = get_current_month_range()
+        club_id = _get_solo_club_id(current_user, db)
+        used = db.query(Match).filter(
+            Match.club_id == club_id,
+            Match.created_at >= start,
+            Match.created_at < end,
+        ).count()
+        return {
+            "plan": "COACH",
+            "quota": quota,
+            "used": used,
+            "remaining": max(0, quota - used),
+            "resets_at": end.isoformat() + "Z",
+        }
+
+    # ── Pas de stripe_subscription_id ─────────────────────────────────
     if current_user.trial_ends_at and now < current_user.trial_ends_at:
         return {
             "plan": "TRIAL",
@@ -234,40 +300,13 @@ async def get_quota_status(
             "resets_at": None,
         }
 
-    if not current_user.stripe_subscription_id:
-        return {
-            "plan": "TRIAL",
-            "quota": TRIAL_MATCH_LIMIT,
-            "used": 1 if current_user.trial_match_used else 0,
-            "remaining": 0 if current_user.trial_match_used else 1,
-            "resets_at": None,
-        }
-
-    if current_user.plan == PlanType.CLUB:
-        quota = PLAN_QUOTAS[PlanType.CLUB]
-        start, end = get_current_month_range()
-        club_id = _get_solo_club_id(current_user, db)
-        used = db.query(Match).filter(
-            Match.club_id == club_id,
-            Match.created_at >= start,
-            Match.created_at < end,
-        ).count()
-        return {"plan": "CLUB", "quota": quota, "used": used, "remaining": max(0, quota - used), "resets_at": end.isoformat() + "Z"}
-
-    quota = PLAN_QUOTAS[PlanType.COACH]
-    start, end = get_current_month_range()
-    club_id = _get_solo_club_id(current_user, db)
-    used = db.query(Match).filter(
-        Match.club_id == club_id,
-        Match.created_at >= start,
-        Match.created_at < end,
-    ).count()
+    # Aucun sub, aucun trial actif
     return {
-        "plan": "COACH",
-        "quota": quota,
-        "used": used,
-        "remaining": max(0, quota - used),
-        "resets_at": end.isoformat() + "Z",
+        "plan": "NO_SUBSCRIPTION",
+        "quota": 0,
+        "used": 0,
+        "remaining": 0,
+        "resets_at": None,
     }
 
 
