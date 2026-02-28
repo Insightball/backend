@@ -44,12 +44,10 @@ def check_and_consume_quota(user: User, db: Session) -> None:
     Ordre de priorité STRICT :
     1. Superadmin → pas de quota
     2. Pas de plan → bloqué
-    3. stripe_subscription_id présent → quota mensuel plan (COACH ou CLUB)
-       NB : trial_ends_at peut être dans le futur ET stripe_subscription_id présent
-            (cas d'un user qui a un sub actif en période de grace)
-            → on utilise TOUJOURS le quota plan, jamais le trial
-    4. Pas de stripe_subscription_id + trial_ends_at futur → 1 match trial
-    5. Sinon → NO_SUBSCRIPTION
+    3. stripe_subscription_id présent ET trial_ends_at futur → 1 match trial (CB enregistrée mais trial pas fini)
+    4. stripe_subscription_id présent ET trial expiré → quota mensuel plan (COACH/CLUB)
+    5. Pas de stripe_subscription_id + trial_ends_at futur → 1 match trial (edge case)
+    6. Sinon → NO_SUBSCRIPTION
     """
     # 1. Superadmin
     if user.is_superadmin:
@@ -62,9 +60,24 @@ def check_and_consume_quota(user: User, db: Session) -> None:
             detail="NO_ACTIVE_PLAN"
         )
 
-    # 3. ── Abonnement Stripe actif (trialing OU actif) ────────────────
-    # FIX P0 : stripe_subscription_id présent → quota mensuel, jamais trial
+    # 3. ── Abonnement Stripe actif ────────────────────────────────────
+    # Si stripe_subscription_id présent MAIS encore en trial → logique trial (1 match)
     if user.stripe_subscription_id:
+        now = datetime.utcnow()
+        if user.trial_ends_at and now < user.trial_ends_at:
+            # Trial actif avec CB enregistrée → 1 match offert
+            updated = db.query(User).filter(
+                User.id == user.id,
+                User.trial_match_used == False
+            ).update({"trial_match_used": True})
+            db.commit()
+            if updated == 0:
+                raise HTTPException(
+                    status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                    detail="TRIAL_EXHAUSTED"
+                )
+            return
+
         if user.plan == PlanType.CLUB:
             quota = PLAN_QUOTAS[PlanType.CLUB]
             start, end = get_current_month_range()
