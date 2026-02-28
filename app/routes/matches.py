@@ -40,71 +40,55 @@ def check_and_consume_quota(user: User, db: Session) -> None:
     """
     Vérifie que l'utilisateur peut créer un nouveau match.
     Lève une HTTPException 402/429 si le quota est dépassé.
-    Gère aussi le cas trial (1 match gratuit sans abonnement).
+
+    Ordre de priorité STRICT :
+    1. Superadmin → pas de quota
+    2. Pas de plan → bloqué
+    3. stripe_subscription_id présent → quota mensuel plan (COACH ou CLUB)
+       NB : trial_ends_at peut être dans le futur ET stripe_subscription_id présent
+            (cas d'un user qui a un sub actif en période de grace)
+            → on utilise TOUJOURS le quota plan, jamais le trial
+    4. Pas de stripe_subscription_id + trial_ends_at futur → 1 match trial
+    5. Sinon → NO_SUBSCRIPTION
     """
-    # Superadmin : pas de quota
+    # 1. Superadmin
     if user.is_superadmin:
         return
 
-    # Utilisateur sans plan actif → on bloque
+    # 2. Pas de plan
     if not user.plan:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="NO_ACTIVE_PLAN"
         )
 
-    # ── Pas de CB → bloqué ────────────────────────────────
-    if not user.stripe_subscription_id:
-        raise HTTPException(
-            status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail="NO_SUBSCRIPTION"
-        )
+    # 3. ── Abonnement Stripe actif (trialing OU actif) ────────────────
+    # FIX P0 : stripe_subscription_id présent → quota mensuel, jamais trial
+    if user.stripe_subscription_id:
+        if user.plan == PlanType.CLUB:
+            quota = PLAN_QUOTAS[PlanType.CLUB]
+            start, end = get_current_month_range()
+            club_id = _get_solo_club_id(user, db)
+            count = db.query(Match).filter(
+                Match.club_id == club_id,
+                Match.created_at >= start,
+                Match.created_at < end,
+            ).count()
+            if count >= quota:
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail={
+                        "code": "QUOTA_EXCEEDED",
+                        "plan": "CLUB",
+                        "quota": quota,
+                        "used": count,
+                        "resets_at": end.isoformat() + "Z",
+                        "message": f"Quota atteint ({quota} matchs/mois). Renouvellement le 1er du mois."
+                    }
+                )
+            return
 
-    # ── Cas TRIAL ─────────────────────────────────────────
-    # trial_ends_at > now → user en période d'essai → 1 match max
-    # FIX : UPDATE atomique pour éviter la race condition
-    # (deux requêtes simultanées ne peuvent plus toutes les deux passer)
-    now = datetime.utcnow()
-    if user.trial_ends_at and now < user.trial_ends_at:
-        updated = db.query(User).filter(
-            User.id == user.id,
-            User.trial_match_used == False
-        ).update({"trial_match_used": True})
-        db.commit()
-        if updated == 0:
-            # Le flag était déjà True → trial déjà consommé
-            raise HTTPException(
-                status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                detail="TRIAL_EXHAUSTED"
-            )
-        return
-
-    # ── Cas CLUB : quota mensuel 12 ───────────────────────
-    if user.plan == PlanType.CLUB:
-        quota = PLAN_QUOTAS[PlanType.CLUB]
-        start, end = get_current_month_range()
-        club_id = _get_solo_club_id(user, db)
-        count = db.query(Match).filter(
-            Match.club_id == club_id,
-            Match.created_at >= start,
-            Match.created_at < end,
-        ).count()
-        if count >= quota:
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail={
-                    "code": "QUOTA_EXCEEDED",
-                    "plan": "CLUB",
-                    "quota": quota,
-                    "used": count,
-                    "resets_at": end.isoformat() + "Z",
-                    "message": f"Quota atteint ({quota} matchs/mois). Renouvellement le 1er du mois."
-                }
-            )
-        return
-
-    # ── Cas COACH : quota mensuel 4 ───────────────────────
-    if user.plan == PlanType.COACH:
+        # COACH (défaut)
         quota = PLAN_QUOTAS[PlanType.COACH]
         start, end = get_current_month_range()
         count = db.query(Match).filter(
@@ -126,12 +110,29 @@ def check_and_consume_quota(user: User, db: Session) -> None:
             )
         return
 
+    # 4. ── Cas TRIAL : pas de stripe_subscription_id ─────────────────
+    now = datetime.utcnow()
+    if user.trial_ends_at and now < user.trial_ends_at:
+        updated = db.query(User).filter(
+            User.id == user.id,
+            User.trial_match_used == False
+        ).update({"trial_match_used": True})
+        db.commit()
+        if updated == 0:
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail="TRIAL_EXHAUSTED"
+            )
+        return
+
+    # 5. Aucun sub, pas de trial actif
+    raise HTTPException(
+        status_code=status.HTTP_402_PAYMENT_REQUIRED,
+        detail="NO_SUBSCRIPTION"
+    )
+
 
 def _get_solo_club_id(user: User, db: Session) -> str:
-    """
-    Un coach sans club rattaché obtient (ou crée) un club solo.
-    Convention : club.id == user.id pour rester simple.
-    """
     if user.club_id:
         return user.club_id
 
@@ -147,7 +148,6 @@ def _get_solo_club_id(user: User, db: Session) -> str:
 
     user.club_id = solo_club.id
     db.flush()
-
     return solo_club.id
 
 
@@ -161,18 +161,9 @@ async def create_match(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Crée un nouveau match.
-    - Vérifie le quota avant toute création.
-    - Gère le club solo pour les coachs sans club.
-    """
-    # ── 1. Vérif quota (lève 429/402 si dépassé) ───────
     check_and_consume_quota(current_user, db)
-
-    # ── 2. Résolution du club_id ────────────────────────
     club_id = _get_solo_club_id(current_user, db)
 
-    # ── 3. Création du match ────────────────────────────
     match = Match(
         id=str(uuid.uuid4()),
         club_id=club_id,
@@ -204,7 +195,6 @@ async def list_matches(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Liste les matchs du club/coach courant."""
     club_id = _get_solo_club_id(current_user, db)
     matches = (
         db.query(Match)
@@ -220,10 +210,6 @@ async def get_quota_status(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Retourne l'état du quota pour le mois courant.
-    Utile pour afficher la jauge dans le dashboard.
-    """
     if not current_user.stripe_subscription_id:
         return {
             "plan": "TRIAL",
@@ -252,7 +238,6 @@ async def get_quota_status(
         Match.created_at >= start,
         Match.created_at < end,
     ).count()
-
     return {
         "plan": "COACH",
         "quota": quota,
@@ -268,13 +253,11 @@ async def get_match(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Récupère un match — vérifie que l'user y a accès."""
     club_id = _get_solo_club_id(current_user, db)
     match = db.query(Match).filter(
         Match.id == match_id,
         Match.club_id == club_id,
     ).first()
-
     if not match:
         raise HTTPException(status_code=404, detail="Match introuvable")
     return match
@@ -286,21 +269,17 @@ async def delete_match(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Supprime un match. Ne rembourse pas le quota (choix volontaire)."""
     club_id = _get_solo_club_id(current_user, db)
     match = db.query(Match).filter(
         Match.id == match_id,
         Match.club_id == club_id,
     ).first()
-
     if not match:
         raise HTTPException(status_code=404, detail="Match introuvable")
-
     if match.status == MatchStatus.PROCESSING:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Impossible de supprimer un match en cours d'analyse."
         )
-
     db.delete(match)
     db.commit()
