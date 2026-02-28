@@ -65,7 +65,14 @@ def check_and_consume_quota(user: User, db: Session) -> None:
     if user.stripe_subscription_id:
         now = datetime.utcnow()
         if user.trial_ends_at and now < user.trial_ends_at:
-            # Trial actif avec CB enregistrée → 1 match offert
+            # Encore en trial — 1 match offert
+            if user.trial_match_used:
+                # Match trial déjà utilisé → bloquer, pas basculer sur quota mensuel
+                raise HTTPException(
+                    status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                    detail="TRIAL_EXHAUSTED"
+                )
+            # Match trial disponible → consommer atomiquement
             updated = db.query(User).filter(
                 User.id == user.id,
                 User.trial_match_used == False
@@ -228,30 +235,30 @@ async def get_quota_status(
 
     Priorité :
     1. stripe_subscription_id présent :
-       a. trial_ends_at futur ET trial_match_used False → TRIAL (1 match)
+       a. trial_ends_at futur → TRIAL (0 ou 1 selon trial_match_used)
        b. sinon → quota mensuel plan (COACH=4 / CLUB=12)
     2. Pas de stripe_subscription_id :
-       a. trial_ends_at futur → TRIAL (1 match)
+       a. trial_ends_at futur → TRIAL (0 ou 1 selon trial_match_used)
        b. sinon → NO_SUBSCRIPTION (0/0)
 
-    Règle clé : trial_ends_at dans le futur NE signifie PAS que l'user est en trial
-    si stripe_subscription_id est présent — il peut avoir activé son plan (end-trial).
+    Règle clé : pendant le trial, on affiche TOUJOURS le quota trial (1 match max),
+    même si trial_match_used=True. Le quota mensuel ne s'affiche qu'après end-trial.
     """
     now = datetime.utcnow()
 
     # ── Abonnement Stripe présent ──────────────────────────────────────
     if current_user.stripe_subscription_id:
-        in_trial = (
+        is_trialing = (
             current_user.trial_ends_at is not None
             and now < current_user.trial_ends_at
-            and not current_user.trial_match_used
         )
-        if in_trial:
+        if is_trialing:
+            # Encore en trial → afficher quota trial (0 ou 1), jamais quota mensuel
             return {
                 "plan": "TRIAL",
                 "quota": TRIAL_MATCH_LIMIT,
-                "used": 0,
-                "remaining": 1,
+                "used": 1 if current_user.trial_match_used else 0,
+                "remaining": 0 if current_user.trial_match_used else 1,
                 "resets_at": None,
             }
 
