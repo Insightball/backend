@@ -223,6 +223,17 @@ async def get_quota_status(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    # Trial actif : avec OU sans stripe_subscription_id
+    now = datetime.utcnow()
+    if current_user.trial_ends_at and now < current_user.trial_ends_at:
+        return {
+            "plan": "TRIAL",
+            "quota": TRIAL_MATCH_LIMIT,
+            "used": 1 if current_user.trial_match_used else 0,
+            "remaining": 0 if current_user.trial_match_used else 1,
+            "resets_at": None,
+        }
+
     if not current_user.stripe_subscription_id:
         return {
             "plan": "TRIAL",
