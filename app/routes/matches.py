@@ -29,7 +29,6 @@ def get_current_month_range():
     """Retourne le début et la fin du mois courant en UTC."""
     now = datetime.utcnow()
     start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    # Fin du mois : premier jour du mois suivant
     if now.month == 12:
         end = start.replace(year=now.year + 1, month=1)
     else:
@@ -40,42 +39,47 @@ def get_current_month_range():
 def check_and_consume_quota(user: User, db: Session) -> None:
     """
     Vérifie que l'utilisateur peut créer un nouveau match.
-    Lève une HTTPException 429 si le quota est dépassé.
+    Lève une HTTPException 402/429 si le quota est dépassé.
     Gère aussi le cas trial (1 match gratuit sans abonnement).
     """
     # Superadmin : pas de quota
     if user.is_superadmin:
         return
 
-    # Utilisateur sans plan actif → on bloque (sécurité)
+    # Utilisateur sans plan actif → on bloque
     if not user.plan:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="NO_ACTIVE_PLAN"
         )
 
-    # ── Pas de CB → bloqué (sécurité back, front bloque déjà) ────
+    # ── Pas de CB → bloqué ────────────────────────────────
     if not user.stripe_subscription_id:
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
             detail="NO_SUBSCRIPTION"
         )
 
-    # ── Cas TRIAL (sub Stripe en trialing) ────────────
-    # On détecte le trial via trial_ends_at en base (peuplé par confirm-plan)
-    # Si trial_ends_at > now → user en période d'essai → 1 match max
+    # ── Cas TRIAL ─────────────────────────────────────────
+    # trial_ends_at > now → user en période d'essai → 1 match max
+    # FIX : UPDATE atomique pour éviter la race condition
+    # (deux requêtes simultanées ne peuvent plus toutes les deux passer)
     now = datetime.utcnow()
     if user.trial_ends_at and now < user.trial_ends_at:
-        if user.trial_match_used:
+        updated = db.query(User).filter(
+            User.id == user.id,
+            User.trial_match_used == False
+        ).update({"trial_match_used": True})
+        db.commit()
+        if updated == 0:
+            # Le flag était déjà True → trial déjà consommé
             raise HTTPException(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
                 detail="TRIAL_EXHAUSTED"
             )
-        user.trial_match_used = True
-        db.commit()
         return
 
-    # ── Cas CLUB : quota mensuel 12 ───────────────────
+    # ── Cas CLUB : quota mensuel 12 ───────────────────────
     if user.plan == PlanType.CLUB:
         quota = PLAN_QUOTAS[PlanType.CLUB]
         start, end = get_current_month_range()
@@ -99,21 +103,15 @@ def check_and_consume_quota(user: User, db: Session) -> None:
             )
         return
 
-    # ── Cas COACH : quota mensuel ──────────────────────
+    # ── Cas COACH : quota mensuel 4 ───────────────────────
     if user.plan == PlanType.COACH:
         quota = PLAN_QUOTAS[PlanType.COACH]
         start, end = get_current_month_range()
-
-        # On compte les matchs créés ce mois-ci rattachés à ce user
-        # Le match porte un club_id ; pour un COACH solo on filtre via created_by_user_id
-        # ou via le club solo. On utilise ici une convention : le coach solo a un club
-        # dont l'id == user.id (voir _get_or_create_solo_club).
         count = db.query(Match).filter(
             Match.club_id == _get_solo_club_id(user, db),
             Match.created_at >= start,
             Match.created_at < end,
         ).count()
-
         if count >= quota:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -137,7 +135,6 @@ def _get_solo_club_id(user: User, db: Session) -> str:
     if user.club_id:
         return user.club_id
 
-    # Cherche un club solo existant
     solo_club = db.query(Club).filter(Club.id == user.id).first()
     if not solo_club:
         solo_club = Club(
@@ -148,7 +145,6 @@ def _get_solo_club_id(user: User, db: Session) -> str:
         db.add(solo_club)
         db.flush()
 
-    # Rattache le user à ce club pour les prochains appels
     user.club_id = solo_club.id
     db.flush()
 
@@ -161,7 +157,7 @@ def _get_solo_club_id(user: User, db: Session) -> str:
 
 @router.post("/", status_code=status.HTTP_201_CREATED)
 async def create_match(
-    payload: dict,  # À remplacer par un Pydantic schema MatchCreate
+    payload: dict,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -228,7 +224,6 @@ async def get_quota_status(
     Retourne l'état du quota pour le mois courant.
     Utile pour afficher la jauge dans le dashboard.
     """
-    # Trial — source de vérité = Stripe pour la période, local pour le match
     if not current_user.stripe_subscription_id:
         return {
             "plan": "TRIAL",
@@ -238,7 +233,6 @@ async def get_quota_status(
             "resets_at": None,
         }
 
-    # CLUB
     if current_user.plan == PlanType.CLUB:
         quota = PLAN_QUOTAS[PlanType.CLUB]
         start, end = get_current_month_range()
@@ -250,7 +244,6 @@ async def get_quota_status(
         ).count()
         return {"plan": "CLUB", "quota": quota, "used": used, "remaining": max(0, quota - used), "resets_at": end.isoformat() + "Z"}
 
-    # COACH
     quota = PLAN_QUOTAS[PlanType.COACH]
     start, end = get_current_month_range()
     club_id = _get_solo_club_id(current_user, db)
@@ -303,7 +296,6 @@ async def delete_match(
     if not match:
         raise HTTPException(status_code=404, detail="Match introuvable")
 
-    # On ne supprime pas un match en cours de traitement
     if match.status == MatchStatus.PROCESSING:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

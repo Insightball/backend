@@ -18,6 +18,12 @@ router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)
 resend.api_key = os.getenv("RESEND_API_KEY")
 
+# Source de vérité pour les quotas — aligné avec matches.py
+PLAN_QUOTAS = {
+    PlanType.COACH: 4,
+    PlanType.CLUB: 12,
+}
+
 
 def send_welcome_email(user_name: str, user_email: str, plan: str):
     try:
@@ -95,11 +101,19 @@ async def signup(request: Request, user_data: UserSignup, db: Session = Depends(
     if existing_user:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
 
+    # ── Validation mot de passe (aligné avec reset-password) ──
+    if len(user_data.password) < 8:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Le mot de passe doit contenir au moins 8 caractères"
+        )
+
     club = None
     if user_data.plan == PlanType.CLUB:
         if not user_data.club_name:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Club name is required for CLUB plan")
-        club = Club(id=str(uuid.uuid4()), name=user_data.club_name, quota_matches=10)
+        # ── FIX : quota_matches aligné avec PLAN_QUOTAS (était hardcodé à 10) ──
+        club = Club(id=str(uuid.uuid4()), name=user_data.club_name, quota_matches=PLAN_QUOTAS[PlanType.CLUB])
         db.add(club)
         db.flush()
 

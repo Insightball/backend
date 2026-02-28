@@ -31,7 +31,7 @@ def _plan_value(user):
     return user.plan.value if hasattr(user.plan, 'value') else user.plan
 
 def _send_trial_reminder_email(to_email: str, name: str, debit_date: str):
-    """Rappel J-2 avant fin trial via Resend. Non bloquant."""
+    """Rappel J-3 avant fin trial via Resend. Non bloquant."""
     import httpx
     resend_key = os.getenv("RESEND_API_KEY")
     if not resend_key:
@@ -192,14 +192,13 @@ async def confirm_plan(
 
         # Mettre à jour en base
         from app.models.user import PlanType
-        from datetime import datetime, timezone, timedelta
         try:
             current_user.plan = PlanType(data.plan.upper())
         except ValueError:
             current_user.plan = PlanType.COACH
         current_user.stripe_subscription_id = subscription.id
         current_user.is_active = True
-        # Stocker la date de fin de trial en base pour le quota check
+        # Stocker la date de fin de trial en base pour le quota check (UTC naive)
         if subscription.trial_end:
             current_user.trial_ends_at = datetime.fromtimestamp(
                 subscription.trial_end, tz=timezone.utc
@@ -217,8 +216,9 @@ async def confirm_plan(
 
 
 # ─────────────────────────────────────────────
-# CHECKOUT SESSION — fallback redirection Stripe
-# Gardé pour compatibilité / cas edge
+# CHECKOUT SESSION — flow Stripe hosted
+# Utilisé par TrialExpired et SubscriptionPlans
+# FIX : pas de second trial si l'user en a déjà eu un
 # ─────────────────────────────────────────────
 @router.post("/create-checkout-session")
 async def create_checkout_session(
@@ -237,18 +237,25 @@ async def create_checkout_session(
             current_user.stripe_customer_id = customer.id
             db.commit()
 
+        # FIX P0 — Ne pas accorder un second trial si l'user en a déjà eu un.
+        # trial_ends_at est peuplé dès le premier abonnement (confirm-plan ou checkout).
+        # Si ce champ est renseigné → trial déjà consommé → paiement immédiat.
+        already_trialed = current_user.trial_ends_at is not None
+        subscription_data: dict = {
+            "metadata": {"user_id": str(current_user.id), "plan": data.plan.upper()}
+        }
+        if not already_trialed:
+            subscription_data["trial_period_days"] = 7
+
         checkout_session = stripe.checkout.Session.create(
             customer=current_user.stripe_customer_id,
-            payment_method_types=['card'],
-            line_items=[{'price': price_id, 'quantity': 1}],
-            mode='subscription',
-            subscription_data={
-                'trial_period_days': 7,
-                'metadata': {'user_id': str(current_user.id), 'plan': data.plan.upper()}
-            },
-            success_url=data.success_url + '?session_id={CHECKOUT_SESSION_ID}',
+            payment_method_types=["card"],
+            line_items=[{"price": price_id, "quantity": 1}],
+            mode="subscription",
+            subscription_data=subscription_data,
+            success_url=data.success_url + "?session_id={CHECKOUT_SESSION_ID}",
             cancel_url=data.cancel_url,
-            metadata={'user_id': str(current_user.id), 'plan': data.plan.upper()}
+            metadata={"user_id": str(current_user.id), "plan": data.plan.upper()}
         )
         return {"session_id": checkout_session.id, "url": checkout_session.url}
 
@@ -298,7 +305,6 @@ async def get_trial_status(
                     "plan": _plan_value(current_user),
                 }
             else:
-                # Sub exists but cancelled/unpaid
                 return {
                     "access": "expired",
                     "trial_active": False,
@@ -340,7 +346,6 @@ async def get_trial_status(
             pass
 
     # Aucun sub, aucune CB → pas encore d'essai
-    # NE PAS utiliser created_at comme fallback — l'essai démarre à la CB
     return {
         "access": "no_trial",
         "trial_active": False,
@@ -405,7 +410,6 @@ async def get_subscription_status(
         sub = stripe.Subscription.retrieve(sub_id)
         sub_dict = sub.to_dict() if hasattr(sub, 'to_dict') else dict(sub)
 
-        # Récupérer current_period_end proprement
         period_end = sub_dict.get('current_period_end')
         try:
             items_data = sub_dict.get('items', {}).get('data', [])
@@ -449,7 +453,6 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
         user = db.query(User).filter(User.id == user_id).first()
         if user:
             from app.models.user import PlanType
-            from datetime import datetime, timezone
             try:
                 user.plan = PlanType(plan_str)
             except ValueError:
@@ -457,7 +460,7 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             user.stripe_subscription_id = session.get('subscription')
             user.stripe_customer_id     = session.get('customer') or user.stripe_customer_id
             user.is_active = True
-            # Récupérer trial_end depuis le sub Stripe
+            # Récupérer trial_end depuis le sub Stripe (UTC naive)
             sub_id = session.get('subscription')
             if sub_id:
                 try:
@@ -515,7 +518,8 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             user.stripe_subscription_id = None
             db.commit()
 
-    # ── Abonnement mis à jour (trialing → active, cancel_at_period_end, etc.)
+    # ── Abonnement mis à jour (trialing → active, upgrade, cancel_at_period_end)
+    # FIX P0 — C'est ici la source de vérité pour le plan, pas dans upgrade-plan
     elif event['type'] == 'customer.subscription.updated':
         subscription = event['data']['object']
         user = db.query(User).filter(
@@ -523,7 +527,6 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
         ).first()
         if user:
             user.is_active = subscription['status'] in ('active', 'trialing')
-            # Mettre à jour le plan si présent dans les metadata
             plan_str = subscription.get('metadata', {}).get('plan', '').upper()
             if plan_str in ('COACH', 'CLUB'):
                 from app.models.user import PlanType
@@ -537,24 +540,11 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
 
 
 # ─────────────────────────────────────────────
-# MARQUER L'ANALYSE TRIAL COMME UTILISÉE
-# ─────────────────────────────────────────────
-@router.post("/use-trial-match")
-async def use_trial_match(
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    current_user.trial_match_used = True
-    db.commit()
-    return {"success": True}
-
-
-
-
-# ─────────────────────────────────────────────
 # UPGRADE PLAN
 # Pendant trial → prélève immédiatement (trial_end='now')
 # Après trial   → prorata fin de période
+# FIX P0 — suppression du db.commit() optimiste
+# La mise à jour du plan se fait via webhook customer.subscription.updated
 # ─────────────────────────────────────────────
 class UpgradePlanData(BaseModel):
     plan: str  # "CLUB" uniquement (on ne downgrade pas)
@@ -569,6 +559,7 @@ async def upgrade_plan(
     Upgrade COACH → CLUB.
     Si trialing : trial_end='now' → prélevé immédiatement.
     Si active   : prorata sur la période en cours.
+    Le plan en base est mis à jour via webhook customer.subscription.updated.
     """
     if not current_user.stripe_subscription_id:
         raise HTTPException(status_code=400, detail="No active subscription")
@@ -598,13 +589,9 @@ async def upgrade_plan(
                 metadata={'user_id': str(current_user.id), 'plan': data.plan.upper()},
             )
 
-        # Mettre à jour en base immédiatement
-        from app.models.user import PlanType
-        try:
-            current_user.plan = PlanType(data.plan.upper())
-        except ValueError:
-            pass
-        db.commit()
+        # FIX P0 — PAS de db.commit() ici.
+        # Le plan sera mis à jour proprement via webhook customer.subscription.updated
+        # qui est la seule source de vérité pour l'état du plan en base.
 
         return {
             "success": True,
@@ -614,6 +601,7 @@ async def upgrade_plan(
 
     except stripe.error.StripeError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
 
 # ─────────────────────────────────────────────
 # ANNULATION (cancel_at_period_end)
