@@ -30,6 +30,69 @@ def _plan_to_price(plan: str) -> str:
 def _plan_value(user):
     return user.plan.value if hasattr(user.plan, 'value') else user.plan
 
+def _send_trial_welcome_email(to_email: str, name: str, trial_end: int):
+    """Email de bienvenue apres activation du trial. Non bloquant."""
+    import httpx
+    resend_key = os.getenv("RESEND_API_KEY")
+    if not resend_key:
+        print(f"[WARN] RESEND_API_KEY manquant — welcome email non envoye a {to_email}")
+        return
+    try:
+        first_name = name.split()[0] if name else "Coach"
+        debit_str = ""
+        if trial_end:
+            debit_str = datetime.fromtimestamp(trial_end, tz=timezone.utc).strftime("%d %B %Y")
+        debit_line = (
+            f'<p style="font-size:12px;color:rgba(15,15,13,0.45);margin:16px 0;">'
+            f'Votre carte sera debitee le <strong>{debit_str}</strong> sauf resiliation avant cette date.</p>'
+        ) if debit_str else ""
+        resp = httpx.post(
+            "https://api.resend.com/emails",
+            json={
+                "from":    "InsightBall <contact@insightball.com>",
+                "to":      [to_email],
+                "subject": "Votre essai InsightBall est active - 1 match offert",
+                "html": f"""
+                <div style="font-family:monospace;max-width:520px;margin:0 auto;padding:32px 24px;background:#faf8f4;">
+                  <div style="font-size:22px;font-weight:900;text-transform:uppercase;letter-spacing:.04em;margin-bottom:24px;">
+                    INSIGHT<span style="color:#c9a227;">BALL</span>
+                  </div>
+                  <p style="font-size:15px;color:#2a2a26;line-height:1.6;">Bonjour {first_name},</p>
+                  <p style="font-size:14px;color:#2a2a26;line-height:1.7;">
+                    Votre essai gratuit est active. Vous avez <strong>7 jours</strong> et <strong>1 match offert</strong> pour decouvrir InsightBall.
+                  </p>
+                  <div style="background:#fff;border:1px solid rgba(15,15,13,0.09);border-left:3px solid #c9a227;padding:14px 18px;margin:20px 0;">
+                    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#c9a227;margin-bottom:8px;">Ce qui vous attend</div>
+                    <div style="font-size:12px;color:rgba(15,15,13,0.65);line-height:1.8;">
+                      - Uploadez votre video de match<br/>
+                      - Recevez un rapport tactique complet<br/>
+                      - Heatmaps, stats individuelles et collectives<br/>
+                      - Export PDF
+                    </div>
+                  </div>
+                  {debit_line}
+                  <a href="https://insightball.com/dashboard/matches/upload"
+                     style="display:inline-block;padding:12px 24px;background:#c9a227;color:#0f0f0d;font-size:11px;letter-spacing:.1em;text-transform:uppercase;font-weight:700;text-decoration:none;margin-top:8px;">
+                    Analyser mon premier match
+                  </a>
+                  <p style="font-size:11px;color:rgba(15,15,13,0.35);margin-top:28px;line-height:1.6;">
+                    InsightBall - contact@insightball.com<br/>
+                    Resiliation : Parametres - Gerer mon abonnement
+                  </p>
+                </div>
+                """,
+            },
+            headers={"Authorization": f"Bearer {resend_key}", "Content-Type": "application/json"},
+            timeout=10,
+        )
+        if resp.status_code not in (200, 201):
+            print(f"[WARN] Resend welcome failed {resp.status_code}: {resp.text}")
+        else:
+            print(f"[INFO] Welcome email envoye a {to_email}")
+    except Exception as e:
+        print(f"[ERR] Welcome email failed: {e}")
+
+
 def _send_trial_reminder_email(to_email: str, name: str, debit_date: str):
     """Rappel J-3 avant fin trial via Resend. Non bloquant."""
     import httpx
@@ -208,6 +271,13 @@ async def confirm_plan(
                 subscription.trial_end, tz=timezone.utc
             ).replace(tzinfo=None)
         db.commit()
+
+        # Email de bienvenue — trial activé (non bloquant)
+        _send_trial_welcome_email(
+            to_email=current_user.email,
+            name=current_user.name or "Coach",
+            trial_end=subscription.trial_end,
+        )
 
         return {
             "success": True,
