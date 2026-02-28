@@ -31,6 +31,12 @@ class UserResponse(BaseModel):
     club_name: Optional[str] = None
     club_id: Optional[str] = None
     club_logo: Optional[str] = None
+    # Champs profil onboarding
+    profile_role: Optional[str] = None
+    profile_level: Optional[str] = None
+    profile_phone: Optional[str] = None
+    profile_city: Optional[str] = None
+    profile_diploma: Optional[str] = None
 
     class Config:
         from_attributes = True
