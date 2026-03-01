@@ -1,3 +1,4 @@
+import sentry_sdk
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -7,6 +8,7 @@ from slowapi.errors import RateLimitExceeded
 from apscheduler.schedulers.background import BackgroundScheduler
 from contextlib import asynccontextmanager
 import logging
+import os
 
 from app.database import engine, Base
 from app.routes import auth, matches, players, clubs, subscription, upload, leads, admin, club_members, account, notifications
@@ -14,6 +16,17 @@ from app.models import User, Club, Match
 from app.models.club_member import ClubMember
 
 logger = logging.getLogger(__name__)
+
+# ── Sentry — monitoring erreurs production ──────────────────────
+sentry_dsn = os.getenv("SENTRY_DSN")
+if sentry_dsn:
+    sentry_sdk.init(
+        dsn=sentry_dsn,
+        traces_sample_rate=0.1,
+        environment=os.getenv("ENVIRONMENT", "production"),
+        send_default_pii=False,  # RGPD — pas de données personnelles
+    )
+    logger.info("✅ Sentry initialisé")
 
 limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
 
