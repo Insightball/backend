@@ -48,3 +48,4 @@ tzlocal==5.3.1
 urllib3==2.6.3
 uvicorn==0.41.0
 wrapt==2.1.1
+argon2-cffi
