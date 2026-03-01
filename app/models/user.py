@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, Boolean, ForeignKey, Enum
+from sqlalchemy import Column, String, Integer, DateTime, Boolean, ForeignKey, Enum
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
@@ -7,6 +7,7 @@ from app.database import Base
 class PlanType(str, enum.Enum):
     COACH = "COACH"
     CLUB = "CLUB"
+    CLUB_PRO = "CLUB_PRO"
 
 class UserRole(str, enum.Enum):
     ADMIN = "ADMIN"
@@ -25,6 +26,10 @@ class User(Base):
     plan = Column(Enum(PlanType), nullable=False)
     stripe_customer_id = Column(String, unique=True)
     stripe_subscription_id = Column(String)
+    
+    # Quota override — si défini, prend la priorité sur PLAN_QUOTAS
+    # Utilisé pour les plans CLUB avec quota négocié (10, 15, ou custom)
+    quota_override = Column(Integer, nullable=True)
     
     # For CLUB plan
     club_id = Column(String, ForeignKey("clubs.id"), nullable=True)
