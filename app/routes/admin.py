@@ -5,10 +5,12 @@ from typing import List, Optional
 from datetime import datetime, timedelta
 from pydantic import BaseModel, EmailStr
 import uuid
+import secrets
 
 from app.database import get_db
 from app.models import User, Club
 from app.models.club_member import ClubMember
+from app.models.club_invite import ClubInvite, ClubInviteStatus
 from app.utils.auth import get_password_hash
 from app.dependencies import get_current_user
 
@@ -77,7 +79,7 @@ def admin_dashboard(db: Session = Depends(get_db), _: User = Depends(require_sup
         total_users=db.query(func.count(User.id)).scalar(),
         active_users=db.query(func.count(User.id)).filter(User.is_active == True).scalar(),
         coach_plan_count=db.query(func.count(User.id)).filter(User.plan == "COACH").scalar(),
-        club_plan_count=db.query(func.count(User.id)).filter(User.plan == "CLUB").scalar(),
+        club_plan_count=db.query(func.count(User.id)).filter(User.plan.in_(["CLUB", "CLUB_PRO"])).scalar(),
         users_last_7_days=db.query(func.count(User.id)).filter(User.created_at >= now - timedelta(days=7)).scalar(),
         users_last_30_days=db.query(func.count(User.id)).filter(User.created_at >= now - timedelta(days=30)).scalar(),
         paying_users=db.query(func.count(User.id)).filter(User.stripe_subscription_id != None).scalar(),
@@ -133,7 +135,7 @@ def admin_create_user(body: CreateUserRequest, db: Session = Depends(get_db), _:
     if db.query(User).filter(User.email == body.email).first():
         raise HTTPException(status_code=400, detail="Email déjà utilisé")
     club_id = body.club_id
-    if body.plan.upper() == "CLUB":
+    if body.plan.upper() in ("CLUB", "CLUB_PRO"):
         if not club_id:
             if not body.club_name:
                 raise HTTPException(status_code=400, detail="club_name ou club_id requis pour le plan Club")
@@ -157,7 +159,7 @@ def admin_update_user_plan(user_id: str, body: UpdateUserPlanRequest,
     if not user:
         raise HTTPException(status_code=404, detail="Utilisateur introuvable")
     user.plan = body.plan.upper()
-    if body.plan.upper() == "CLUB":
+    if body.plan.upper() in ("CLUB", "CLUB_PRO"):
         club_id = body.club_id
         if not club_id:
             if not body.club_name:
@@ -214,3 +216,170 @@ def admin_recent_logins(days: int = 30, db: Session = Depends(get_db), _: User =
     return [{"id": u.id, "name": u.name, "email": u.email,
              "plan": u.plan.value if hasattr(u.plan, 'value') else u.plan,
              "last_login": u.last_login, "is_active": u.is_active} for u in users]
+
+
+# ─────────────────────────────────────────────
+# CLUB INVITES — Flow devis → invitation → activation
+# ─────────────────────────────────────────────
+
+# Paliers CLUB — source de vérité
+CLUB_TIERS = {
+    "CLUB":     {"price": 99,  "quota": 10},
+    "CLUB_PRO": {"price": 139, "quota": 15},
+}
+
+
+class CreateClubInviteRequest(BaseModel):
+    email: EmailStr
+    first_name: str
+    last_name: str
+    phone: str = ""
+    function: str = ""  # Responsable Technique, Directeur Sportif, Président
+    club_name: str
+    city: str = ""
+    nb_teams_11: int = 0
+    nb_matches_estimated: int = 0
+    plan_tier: str  # CLUB ou CLUB_PRO
+
+
+class ClubInviteView(BaseModel):
+    id: str
+    token: str
+    email: str
+    first_name: str
+    last_name: str
+    phone: Optional[str] = None
+    function: Optional[str] = None
+    club_name: str
+    city: Optional[str] = None
+    nb_teams_11: Optional[int] = None
+    nb_matches_estimated: Optional[int] = None
+    plan_tier: str
+    plan_price: int
+    quota_matches: int
+    status: str
+    existing_user_id: Optional[str] = None
+    created_at: datetime
+    expires_at: datetime
+    accepted_at: Optional[datetime] = None
+    invite_url: str = ""
+    class Config:
+        from_attributes = True
+
+
+@router.get("/club-invites", response_model=List[ClubInviteView])
+def admin_list_club_invites(
+    status_filter: Optional[str] = None,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin)
+):
+    """Liste toutes les invitations CLUB."""
+    query = db.query(ClubInvite)
+    if status_filter:
+        try:
+            query = query.filter(ClubInvite.status == ClubInviteStatus(status_filter.upper()))
+        except ValueError:
+            pass
+    invites = query.order_by(ClubInvite.created_at.desc()).all()
+    result = []
+    for inv in invites:
+        view = ClubInviteView(
+            id=inv.id, token=inv.token, email=inv.email,
+            first_name=inv.first_name, last_name=inv.last_name,
+            phone=inv.phone, function=inv.function,
+            club_name=inv.club_name, city=inv.city,
+            nb_teams_11=inv.nb_teams_11, nb_matches_estimated=inv.nb_matches_estimated,
+            plan_tier=inv.plan_tier, plan_price=inv.plan_price,
+            quota_matches=inv.quota_matches,
+            status=inv.status.value if hasattr(inv.status, 'value') else inv.status,
+            existing_user_id=inv.existing_user_id,
+            created_at=inv.created_at, expires_at=inv.expires_at,
+            accepted_at=inv.accepted_at,
+            invite_url=f"https://insightball.com/club-invite/{inv.token}",
+        )
+        result.append(view)
+    return result
+
+
+@router.post("/create-club-invite", status_code=201)
+def admin_create_club_invite(
+    body: CreateClubInviteRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin)
+):
+    """
+    Crée une invitation CLUB.
+    - Vérifie si l'email correspond à un user existant (upgrade Coach → Club)
+    - Génère un token unique
+    - Expire dans 30 jours
+    """
+    # Valider le tier
+    tier = body.plan_tier.upper()
+    if tier not in CLUB_TIERS:
+        raise HTTPException(status_code=400, detail=f"Tier invalide. Valeurs : {list(CLUB_TIERS.keys())}")
+
+    tier_config = CLUB_TIERS[tier]
+
+    # Vérifier si l'email correspond à un user existant
+    existing_user = db.query(User).filter(User.email == body.email).first()
+    existing_user_id = existing_user.id if existing_user else None
+
+    # Vérifier qu'il n'y a pas déjà une invitation PENDING pour cet email
+    existing_invite = db.query(ClubInvite).filter(
+        ClubInvite.email == body.email,
+        ClubInvite.status == ClubInviteStatus.PENDING,
+    ).first()
+    if existing_invite:
+        raise HTTPException(status_code=400, detail="Une invitation est déjà en attente pour cet email")
+
+    token = secrets.token_urlsafe(32)
+    invite = ClubInvite(
+        id=str(uuid.uuid4()),
+        token=token,
+        email=body.email,
+        first_name=body.first_name,
+        last_name=body.last_name,
+        phone=body.phone,
+        function=body.function,
+        club_name=body.club_name,
+        city=body.city,
+        nb_teams_11=body.nb_teams_11,
+        nb_matches_estimated=body.nb_matches_estimated,
+        plan_tier=tier,
+        plan_price=tier_config["price"],
+        quota_matches=tier_config["quota"],
+        status=ClubInviteStatus.PENDING,
+        existing_user_id=existing_user_id,
+        expires_at=datetime.utcnow() + timedelta(days=30),
+    )
+    db.add(invite)
+    db.commit()
+
+    invite_url = f"https://insightball.com/club-invite/{token}"
+
+    return {
+        "id": invite.id,
+        "token": token,
+        "invite_url": invite_url,
+        "existing_user": existing_user_id is not None,
+        "plan_tier": tier,
+        "plan_price": tier_config["price"],
+        "quota_matches": tier_config["quota"],
+    }
+
+
+@router.delete("/club-invites/{invite_id}")
+def admin_cancel_club_invite(
+    invite_id: str,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin)
+):
+    """Annule une invitation PENDING."""
+    invite = db.query(ClubInvite).filter(ClubInvite.id == invite_id).first()
+    if not invite:
+        raise HTTPException(status_code=404, detail="Invitation introuvable")
+    if invite.status != ClubInviteStatus.PENDING:
+        raise HTTPException(status_code=400, detail="Seules les invitations en attente peuvent être annulées")
+    invite.status = ClubInviteStatus.EXPIRED
+    db.commit()
+    return {"message": "Invitation annulée"}
