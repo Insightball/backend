@@ -11,19 +11,34 @@ from app.dependencies import get_current_user
 router = APIRouter()
 
 # ─────────────────────────────────────────────
-# QUOTAS PAR PLAN
+# QUOTAS PAR PLAN (valeurs par défaut)
+# Priorité : quota_override > PLAN_QUOTAS
+# Source de vérité pricing : Coach=4, Club=10, Club Pro=15
 # ─────────────────────────────────────────────
 PLAN_QUOTAS = {
-    PlanType.COACH: 4,    # 4 matchs / mois
-    PlanType.CLUB: 12,    # 12 matchs / mois
+    PlanType.COACH:    4,
+    PlanType.CLUB:     10,
+    PlanType.CLUB_PRO: 15,
 }
 
-TRIAL_MATCH_LIMIT = 1   # 1 match gratuit
+TRIAL_MATCH_LIMIT = 1
 
 
 # ─────────────────────────────────────────────
 # HELPERS QUOTA
 # ─────────────────────────────────────────────
+
+def get_user_quota(user: User) -> int:
+    """
+    Source de vérité unique pour le quota d'un user.
+    Priorise quota_override (défini à la création du club invite)
+    sur les valeurs par défaut du plan.
+    Appelé dans check_and_consume_quota ET get_quota_status.
+    """
+    if user.quota_override is not None and user.quota_override > 0:
+        return user.quota_override
+    return PLAN_QUOTAS.get(user.plan, PLAN_QUOTAS[PlanType.COACH])
+
 
 def get_billing_period(user: User):
     """
@@ -51,7 +66,7 @@ def check_and_consume_quota(user: User, db: Session) -> None:
     1. Superadmin → pas de quota
     2. Pas de plan → bloqué
     3. stripe_subscription_id présent ET trial_ends_at futur → 1 match trial
-    4. stripe_subscription_id présent ET trial expiré → quota cycle Stripe
+    4. stripe_subscription_id présent ET trial expiré → quota cycle Stripe (quota_override prioritaire)
     5. Pas de stripe_subscription_id + trial_ends_at futur → 1 match trial
     6. Sinon → NO_SUBSCRIPTION
     """
@@ -90,7 +105,8 @@ def check_and_consume_quota(user: User, db: Session) -> None:
             return
 
         # Trial expiré → quota cycle Stripe
-        quota = PLAN_QUOTAS.get(user.plan, PLAN_QUOTAS[PlanType.COACH])
+        # quota_override prioritaire sur PLAN_QUOTAS
+        quota = get_user_quota(user)
         start, end = get_billing_period(user)
         club_id = _get_solo_club_id(user, db)
         # Exclure le match trial : ne compter que les matchs créés après fin trial
@@ -217,8 +233,8 @@ async def get_quota_status(
 ):
     """
     Source de vérité pour le quota affiché dans le dashboard.
-    Utilise le cycle de facturation Stripe (current_period_start/end),
-    pas le mois calendaire.
+    Utilise get_user_quota() → quota_override prioritaire sur PLAN_QUOTAS.
+    Utilise le cycle de facturation Stripe, pas le mois calendaire.
     """
     now = datetime.utcnow()
 
@@ -237,8 +253,8 @@ async def get_quota_status(
                 "resets_at": None,
             }
 
-        # Quota cycle Stripe
-        quota = PLAN_QUOTAS.get(current_user.plan, PLAN_QUOTAS[PlanType.COACH])
+        # Quota cycle Stripe — quota_override prioritaire
+        quota = get_user_quota(current_user)
         start, end = get_billing_period(current_user)
         club_id = _get_solo_club_id(current_user, db)
         trial_cutoff = current_user.trial_ends_at or start
