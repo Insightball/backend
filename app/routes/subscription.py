@@ -7,9 +7,11 @@ import os
 from datetime import datetime, timezone
 
 from app.database import get_db
-from app.models import User
+from app.models import User, Club
+from app.models.club_invite import ClubInvite, ClubInviteStatus
 from app.dependencies import get_current_active_user
 from pydantic import BaseModel
+import uuid as _uuid
 
 router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)
@@ -17,8 +19,16 @@ limiter = Limiter(key_func=get_remote_address)
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 
 # ⚠️  Mettre à jour dans Render > Environment Variables
-STRIPE_PRICE_COACH = os.getenv("STRIPE_PRICE_COACH", "price_coach_39")
-STRIPE_PRICE_CLUB  = os.getenv("STRIPE_PRICE_CLUB",  "price_club_129")
+STRIPE_PRICE_COACH    = os.getenv("STRIPE_PRICE_COACH",    "price_coach_39")
+STRIPE_PRICE_CLUB     = os.getenv("STRIPE_PRICE_CLUB",     "price_club_129")
+STRIPE_PRICE_CLUB_99  = os.getenv("STRIPE_PRICE_CLUB_99",  "price_club_99")
+STRIPE_PRICE_CLUB_139 = os.getenv("STRIPE_PRICE_CLUB_139", "price_club_139")
+
+# Mapping tier CLUB → Stripe price_id
+CLUB_PRICE_MAP = {
+    "CLUB":     STRIPE_PRICE_CLUB_99,
+    "CLUB_PRO": STRIPE_PRICE_CLUB_139,
+}
 
 
 # ─────────────────────────────────────────────
@@ -26,8 +36,9 @@ STRIPE_PRICE_CLUB  = os.getenv("STRIPE_PRICE_CLUB",  "price_club_129")
 # ─────────────────────────────────────────────
 def _plan_to_price(plan: str) -> str:
     p = plan.upper()
-    if p == "COACH": return STRIPE_PRICE_COACH
-    if p == "CLUB":  return STRIPE_PRICE_CLUB
+    if p == "COACH":    return STRIPE_PRICE_COACH
+    if p == "CLUB":     return STRIPE_PRICE_CLUB_99
+    if p == "CLUB_PRO": return STRIPE_PRICE_CLUB_139
     raise HTTPException(status_code=400, detail="Invalid plan")
 
 def _resend_post(resend_key: str, payload: dict) -> int:
@@ -540,6 +551,7 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
         session  = event['data']['object']
         user_id  = session['metadata'].get('user_id')
         plan_str = session['metadata'].get('plan', '').upper()
+        club_invite_token = session['metadata'].get('club_invite_token')
         user = db.query(User).filter(User.id == user_id).first()
         if user:
             from app.models.user import PlanType
@@ -550,12 +562,28 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             user.stripe_subscription_id = session.get('subscription')
             user.stripe_customer_id     = session.get('customer') or user.stripe_customer_id
             user.is_active = True
+
+            # ── CLUB INVITE — Activer le quota override + marquer l'invitation ──
+            if club_invite_token:
+                invite = db.query(ClubInvite).filter(
+                    ClubInvite.token == club_invite_token
+                ).first()
+                if invite:
+                    user.quota_override = invite.quota_matches
+                    user.role = "ADMIN"
+                    invite.status = ClubInviteStatus.ACCEPTED
+                    invite.accepted_at = datetime.utcnow()
+
             # Récupérer trial_end + billing period depuis le sub Stripe
             sub_id = session.get('subscription')
             if sub_id:
                 try:
                     sub = stripe.Subscription.retrieve(sub_id)
                     sub_dict = sub.to_dict() if hasattr(sub, 'to_dict') else dict(sub)
+                    # Quota override depuis metadata subscription (backup)
+                    quota_str = sub_dict.get('metadata', {}).get('quota_override')
+                    if quota_str and not user.quota_override:
+                        user.quota_override = int(quota_str)
                     if sub.trial_end:
                         user.trial_ends_at = datetime.fromtimestamp(
                             sub.trial_end, tz=timezone.utc
@@ -809,3 +837,181 @@ async def cancel_subscription(
         return {"success": True, "cancel_at": subscription.cancel_at}
     except stripe.error.StripeError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# ─────────────────────────────────────────────
+# CLUB INVITE — Endpoints publics (pas de auth)
+# Le DS clique sur le lien, crée son compte (ou upgrade) et paie via Stripe Checkout
+# ─────────────────────────────────────────────
+
+class ClubInviteRegister(BaseModel):
+    """Données pour créer un compte lors de l'acceptation d'une invitation CLUB."""
+    name: str = ""
+    password: str = ""
+
+
+@router.get("/club-invite/{token}")
+async def get_club_invite(token: str, db: Session = Depends(get_db)):
+    """
+    Retourne les infos de l'invitation CLUB.
+    Endpoint public — pas de auth requise.
+    Utilisé par la page /club-invite/:token pour afficher l'offre.
+    """
+    invite = db.query(ClubInvite).filter(ClubInvite.token == token).first()
+    if not invite:
+        raise HTTPException(status_code=404, detail="Invitation introuvable")
+
+    if invite.status != ClubInviteStatus.PENDING:
+        raise HTTPException(status_code=410, detail="Cette invitation a déjà été utilisée ou a expiré")
+
+    if invite.expires_at < datetime.utcnow():
+        invite.status = ClubInviteStatus.EXPIRED
+        db.commit()
+        raise HTTPException(status_code=410, detail="Cette invitation a expiré")
+
+    # Vérifier si le DS a déjà un compte
+    existing_user = None
+    if invite.existing_user_id:
+        existing_user = db.query(User).filter(User.id == invite.existing_user_id).first()
+
+    return {
+        "token": invite.token,
+        "email": invite.email,
+        "first_name": invite.first_name,
+        "last_name": invite.last_name,
+        "club_name": invite.club_name,
+        "city": invite.city,
+        "plan_tier": invite.plan_tier,
+        "plan_price": invite.plan_price,
+        "quota_matches": invite.quota_matches,
+        "has_existing_account": existing_user is not None,
+        "existing_user_name": existing_user.name if existing_user else None,
+    }
+
+
+@router.post("/club-invite/{token}/accept")
+async def accept_club_invite(
+    token: str,
+    data: ClubInviteRegister = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Accepte l'invitation CLUB :
+    1. Si nouveau user → crée le compte avec data.name + data.password
+    2. Si user existant (upgrade Coach → Club) → data peut être vide
+    3. Crée une Stripe Checkout Session (CB + SEPA) → retourne l'URL
+
+    Le plan est activé uniquement via webhook checkout.session.completed.
+    """
+    from app.models.user import PlanType
+    from app.utils.auth import get_password_hash
+
+    invite = db.query(ClubInvite).filter(ClubInvite.token == token).first()
+    if not invite:
+        raise HTTPException(status_code=404, detail="Invitation introuvable")
+
+    if invite.status != ClubInviteStatus.PENDING:
+        raise HTTPException(status_code=410, detail="Cette invitation a déjà été utilisée ou a expiré")
+
+    if invite.expires_at < datetime.utcnow():
+        invite.status = ClubInviteStatus.EXPIRED
+        db.commit()
+        raise HTTPException(status_code=410, detail="Cette invitation a expiré")
+
+    # ── Trouver ou créer le user ──
+    user = None
+    if invite.existing_user_id:
+        user = db.query(User).filter(User.id == invite.existing_user_id).first()
+
+    if not user:
+        # Vérifier si un compte existe déjà avec cet email (cas: créé entre-temps)
+        user = db.query(User).filter(User.email == invite.email).first()
+
+    if not user:
+        # Nouveau user — on a besoin de name + password
+        if not data or not data.name or not data.password:
+            raise HTTPException(status_code=400, detail="Nom et mot de passe requis pour créer votre compte")
+        if len(data.password) < 8:
+            raise HTTPException(status_code=400, detail="Le mot de passe doit contenir au moins 8 caractères")
+
+        plan_type = PlanType.CLUB_PRO if invite.plan_tier == "CLUB_PRO" else PlanType.CLUB
+        user = User(
+            id=str(_uuid.uuid4()),
+            email=invite.email,
+            hashed_password=get_password_hash(data.password),
+            name=data.name,
+            plan=plan_type,
+            role="ADMIN",
+            is_active=False,  # Activé par le webhook après paiement
+        )
+        db.add(user)
+        db.flush()
+
+    # ── Créer le Club si pas encore de club_id ──
+    if not user.club_id:
+        club = Club(
+            id=str(_uuid.uuid4()),
+            name=invite.club_name,
+            quota_matches=invite.quota_matches,
+        )
+        db.add(club)
+        db.flush()
+        user.club_id = club.id
+
+    # ── Créer / récupérer le Stripe Customer ──
+    if not user.stripe_customer_id:
+        customer = stripe.Customer.create(
+            email=user.email,
+            metadata={"user_id": str(user.id), "name": user.name},
+        )
+        user.stripe_customer_id = customer.id
+
+    db.commit()
+
+    # ── Si le user a une sub Coach active, on l'annule d'abord ──
+    if user.stripe_subscription_id:
+        try:
+            stripe.Subscription.cancel(user.stripe_subscription_id)
+            user.stripe_subscription_id = None
+            db.commit()
+        except stripe.error.StripeError:
+            pass  # Sub déjà annulée ou inexistante
+
+    # ── Créer la Stripe Checkout Session (CB + SEPA) ──
+    price_id = CLUB_PRICE_MAP.get(invite.plan_tier)
+    if not price_id:
+        raise HTTPException(status_code=500, detail="Configuration prix Stripe manquante")
+
+    plan_label = "CLUB_PRO" if invite.plan_tier == "CLUB_PRO" else "CLUB"
+
+    try:
+        checkout_session = stripe.checkout.Session.create(
+            customer=user.stripe_customer_id,
+            payment_method_types=["card", "sepa_debit"],
+            line_items=[{"price": price_id, "quantity": 1}],
+            mode="subscription",
+            subscription_data={
+                "metadata": {
+                    "user_id": str(user.id),
+                    "plan": plan_label,
+                    "club_invite_token": token,
+                    "quota_override": str(invite.quota_matches),
+                },
+            },
+            success_url=f"https://insightball.com/dashboard?club_activated=true&session_id={{CHECKOUT_SESSION_ID}}",
+            cancel_url=f"https://insightball.com/club-invite/{token}?cancelled=true",
+            metadata={
+                "user_id": str(user.id),
+                "plan": plan_label,
+                "club_invite_token": token,
+            },
+        )
+
+        return {
+            "checkout_url": checkout_session.url,
+            "session_id": checkout_session.id,
+        }
+
+    except stripe.error.StripeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
