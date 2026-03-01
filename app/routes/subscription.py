@@ -658,7 +658,7 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             new_status = subscription['status']
             user.is_active = new_status in ('active', 'trialing')
             plan_str = subscription.get('metadata', {}).get('plan', '').upper()
-            if plan_str in ('COACH', 'CLUB'):
+            if plan_str in ('COACH', 'CLUB', 'CLUB_PRO'):
                 from app.models.user import PlanType
                 try:
                     user.plan = PlanType(plan_str)
