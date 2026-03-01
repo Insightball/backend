@@ -1,4 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 import stripe
 import os
@@ -10,6 +12,7 @@ from app.dependencies import get_current_active_user
 from pydantic import BaseModel
 
 router = APIRouter()
+limiter = Limiter(key_func=get_remote_address)
 
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 
@@ -522,6 +525,9 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
     sig_header     = request.headers.get('stripe-signature')
     webhook_secret = os.getenv("STRIPE_WEBHOOK_SECRET")
 
+    if not webhook_secret:
+        raise HTTPException(status_code=500, detail="Webhook secret not configured")
+
     try:
         event = stripe.Webhook.construct_event(payload, sig_header, webhook_secret)
     except ValueError:
@@ -654,7 +660,9 @@ class ClubQuoteRequest(BaseModel):
     message: str = ""  # Message optionnel du coach
 
 @router.post("/request-club-quote")
+@limiter.limit("3/hour")
 async def request_club_quote(
+    request: Request,
     data: ClubQuoteRequest,
     current_user: User = Depends(get_current_active_user),
 ):
