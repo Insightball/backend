@@ -192,8 +192,10 @@ async def login(request: Request, credentials: UserLogin, db: Session = Depends(
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="ACCOUNT_PERMANENTLY_DELETED")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"ACCOUNT_DELETED:{user.recovery_token}")
 
-    if not user.is_active:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Inactive user")
+    # NOTE : on ne bloque PAS les users is_active=False au login.
+    # Un user dont le trial/sub a expiré doit pouvoir se connecter
+    # pour accéder aux settings et se réabonner.
+    # La protection se fait au niveau des actions (upload, matchs) via le quota system.
 
     user.last_login = datetime.utcnow()
     db.commit()
