@@ -7,6 +7,11 @@ import uuid
 import resend
 import os
 
+import urllib.request
+import urllib.error
+import urllib.parse
+import json as _json
+
 from app.database import get_db
 from app.models import User, Club, PlanType
 from app.schemas import UserSignup, UserLogin, Token, UserResponse
@@ -23,6 +28,31 @@ PLAN_QUOTAS = {
     PlanType.COACH: 4,
     PlanType.CLUB: 12,
 }
+
+
+def _verify_recaptcha(token: str) -> bool:
+    """Vérifie le token reCAPTCHA v3 auprès de Google. Score >= 0.5 = humain."""
+    secret = os.getenv("RECAPTCHA_SECRET_KEY")
+    if not secret:
+        return True  # Pas de clé configurée → on laisse passer (dev local)
+    if not token:
+        return False
+    try:
+        data = urllib.parse.urlencode({
+            "secret": secret,
+            "response": token,
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            "https://www.google.com/recaptcha/api/siteverify",
+            data=data,
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=5) as r:
+            result = _json.loads(r.read().decode("utf-8"))
+            return result.get("success", False) and result.get("score", 0) >= 0.5
+    except Exception as e:
+        print(f"[ERR] reCAPTCHA verify failed: {e}")
+        return True  # Fail open — ne pas bloquer les vrais users si Google est down
 
 
 def send_welcome_email(user_name: str, user_email: str, plan: str):
@@ -95,8 +125,16 @@ def send_welcome_email(user_name: str, user_email: str, plan: str):
 
 
 @router.post("/signup", response_model=Token)
-@limiter.limit("10/minute")
+@limiter.limit("3/minute")
 async def signup(request: Request, user_data: UserSignup, db: Session = Depends(get_db)):
+    # ── reCAPTCHA v3 — anti-bot (activé uniquement si RECAPTCHA_SECRET_KEY configuré) ──
+    recaptcha_token = getattr(user_data, 'recaptcha_token', None) or ''
+    if os.getenv("RECAPTCHA_SECRET_KEY") and not _verify_recaptcha(recaptcha_token):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Vérification anti-bot échouée. Réessayez."
+        )
+
     existing_user = db.query(User).filter(User.email == user_data.email).first()
     if existing_user:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
