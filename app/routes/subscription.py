@@ -20,7 +20,6 @@ stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 
 # ⚠️  Mettre à jour dans Render > Environment Variables
 STRIPE_PRICE_COACH    = os.getenv("STRIPE_PRICE_COACH",    "price_coach_39")
-STRIPE_PRICE_CLUB     = os.getenv("STRIPE_PRICE_CLUB",     "price_club_129")
 STRIPE_PRICE_CLUB_99  = os.getenv("STRIPE_PRICE_CLUB_99",  "price_club_99")
 STRIPE_PRICE_CLUB_139 = os.getenv("STRIPE_PRICE_CLUB_139", "price_club_139")
 
@@ -998,7 +997,7 @@ async def accept_club_invite(
                     "quota_override": str(invite.quota_matches),
                 },
             },
-            success_url=f"https://insightball.com/dashboard?club_activated=true&session_id={{CHECKOUT_SESSION_ID}}",
+            success_url=f"https://insightball.com/login?welcome=club&session_id={{CHECKOUT_SESSION_ID}}",
             cancel_url=f"https://insightball.com/club-invite/{token}?cancelled=true",
             metadata={
                 "user_id": str(user.id),
