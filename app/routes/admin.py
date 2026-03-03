@@ -371,15 +371,19 @@ def admin_create_club_invite(
 @router.delete("/club-invites/{invite_id}")
 def admin_cancel_club_invite(
     invite_id: str,
+    force: bool = False,
     db: Session = Depends(get_db),
     _: User = Depends(require_superadmin)
 ):
-    """Annule une invitation PENDING."""
+    """Annule/supprime une invitation. force=true pour les invites déjà acceptées."""
     invite = db.query(ClubInvite).filter(ClubInvite.id == invite_id).first()
     if not invite:
         raise HTTPException(status_code=404, detail="Invitation introuvable")
-    if invite.status != ClubInviteStatus.PENDING:
-        raise HTTPException(status_code=400, detail="Seules les invitations en attente peuvent être annulées")
-    invite.status = ClubInviteStatus.EXPIRED
+    if invite.status != ClubInviteStatus.PENDING and not force:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invitation déjà '{invite.status.value}'. Utilisez force=true pour forcer la suppression."
+        )
+    db.delete(invite)
     db.commit()
-    return {"message": "Invitation annulée"}
+    return {"message": "Invitation supprimée"}
