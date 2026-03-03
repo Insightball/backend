@@ -52,6 +52,13 @@ def get_billing_period(user: User):
     return start, end
 
 
+def _is_club_admin(user: User) -> bool:
+    return (
+        user.plan in [PlanType.CLUB, PlanType.CLUB_PRO]
+        and user.role in ['ADMIN', 'admin']
+    )
+
+
 def check_and_consume_quota(user: User, db: Session) -> None:
     if user.is_superadmin:
         return
@@ -140,6 +147,7 @@ async def create_match(
     match = Match(
         id=str(uuid.uuid4()),
         club_id=club_id,
+        created_by=current_user.id,
         opponent=payload.get("opponent"),
         date=datetime.fromisoformat(payload["date"]) if payload.get("date") else datetime.utcnow(),
         category=payload.get("category", "N3"),
@@ -167,12 +175,14 @@ async def list_matches(
     current_user: User = Depends(get_current_user),
 ):
     club_id = _get_solo_club_id(current_user, db)
-    matches = (
-        db.query(Match)
-        .filter(Match.club_id == club_id)
-        .order_by(Match.date.desc())
-        .all()
-    )
+    query = db.query(Match).filter(Match.club_id == club_id)
+
+    # DS admin et superadmin voient tous les matchs du club
+    # Coaches membres voient uniquement leurs propres matchs
+    if not current_user.is_superadmin and not _is_club_admin(current_user):
+        query = query.filter(Match.created_by == current_user.id)
+
+    matches = query.order_by(Match.date.desc()).all()
     return matches
 
 
@@ -241,10 +251,15 @@ async def get_match(
     current_user: User = Depends(get_current_user),
 ):
     club_id = _get_solo_club_id(current_user, db)
-    match = db.query(Match).filter(
+    query = db.query(Match).filter(
         Match.id == match_id,
         Match.club_id == club_id,
-    ).first()
+    )
+    # Coach membre : accès uniquement à ses propres matchs
+    if not current_user.is_superadmin and not _is_club_admin(current_user):
+        query = query.filter(Match.created_by == current_user.id)
+
+    match = query.first()
     if not match:
         raise HTTPException(status_code=404, detail="Match introuvable")
     return match
@@ -257,10 +272,15 @@ async def delete_match(
     current_user: User = Depends(get_current_user),
 ):
     club_id = _get_solo_club_id(current_user, db)
-    match = db.query(Match).filter(
+    query = db.query(Match).filter(
         Match.id == match_id,
         Match.club_id == club_id,
-    ).first()
+    )
+    # Coach membre : suppression uniquement de ses propres matchs
+    if not current_user.is_superadmin and not _is_club_admin(current_user):
+        query = query.filter(Match.created_by == current_user.id)
+
+    match = query.first()
     if not match:
         raise HTTPException(status_code=404, detail="Match introuvable")
     if match.status == MatchStatus.PROCESSING:

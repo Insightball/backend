@@ -20,6 +20,7 @@ class Match(Base):
     
     id = Column(String, primary_key=True, index=True)
     club_id = Column(String, ForeignKey("clubs.id"), nullable=False)
+    created_by = Column(String, nullable=True)  # user.id — coach qui a uploadé le match
     
     # Match info
     opponent = Column(String, nullable=False)
@@ -46,7 +47,7 @@ class Match(Base):
     progress = Column(Integer, default=0)
     error_message = Column(String, nullable=True)
     
-    # Lineup - NOUVEAU
+    # Lineup
     lineup = Column(JSON, nullable=True)
     
     # Stats
@@ -54,14 +55,14 @@ class Match(Base):
     
     # Match context
     is_home = Column(Boolean, default=True)
-    formation = Column(String, nullable=True)       # ex: "4-3-3"
+    formation = Column(String, nullable=True)
     opponent_formation = Column(String, nullable=True)
     
     # IA Analysis output
-    analysis_data = Column(JSON, nullable=True)     # heatmaps, player tracking, phases
-    ai_insights = Column(Text, nullable=True)       # texte généré par GPT-4
-    player_stats = Column(JSON, nullable=True)      # stats individuelles par joueur
-    events = Column(JSON, nullable=True)            # buts, cartons, remplacements
+    analysis_data = Column(JSON, nullable=True)
+    ai_insights = Column(Text, nullable=True)
+    player_stats = Column(JSON, nullable=True)
+    events = Column(JSON, nullable=True)
     
     # Metadata
     uploaded_at = Column(DateTime, default=datetime.utcnow)
