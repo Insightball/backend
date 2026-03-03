@@ -40,7 +40,27 @@ def get_user_quota(user: User) -> int:
     return PLAN_QUOTAS.get(user.plan, PLAN_QUOTAS[PlanType.COACH])
 
 
-def get_billing_period(user: User):
+def get_billing_user(user: User, db: Session) -> User:
+    """
+    Retourne l'utilisateur de référence pour la facturation.
+    - Si l'user est membre d'un club (pas de stripe_subscription_id)
+      → cherche l'admin CLUB qui a le stripe_subscription_id
+    - Sinon → retourne l'user lui-même
+    Pool commun : tous les coachs d'un club consomment le quota du DS admin.
+    """
+    if user.stripe_subscription_id:
+        return user
+    if not user.club_id:
+        return user
+    # Chercher l'admin du club qui a un abonnement actif
+    club_admin = db.query(User).filter(
+        User.club_id == user.club_id,
+        User.stripe_subscription_id != None,
+        User.plan.in_([PlanType.CLUB, PlanType.CLUB_PRO]),
+    ).first()
+    if club_admin:
+        return club_admin
+    return user
     """
     Retourne (start, end) du cycle de facturation Stripe.
     Peuplé via webhooks — si absent, fallback sur mois calendaire.
@@ -81,17 +101,19 @@ def check_and_consume_quota(user: User, db: Session) -> None:
             detail="NO_ACTIVE_PLAN"
         )
 
+    # Résoudre l'utilisateur de facturation (pool commun club)
+    billing_user = get_billing_user(user, db)
+
     # 3. ── Abonnement Stripe actif ────────────────────────────────────
-    if user.stripe_subscription_id:
+    if billing_user.stripe_subscription_id:
         now = datetime.utcnow()
-        if user.trial_ends_at and now < user.trial_ends_at:
+        if billing_user.trial_ends_at and now < billing_user.trial_ends_at:
             # Encore en trial — 1 match offert
             if user.trial_match_used:
                 raise HTTPException(
                     status_code=status.HTTP_402_PAYMENT_REQUIRED,
                     detail="TRIAL_EXHAUSTED"
                 )
-            # Match trial disponible → consommer atomiquement
             updated = db.query(User).filter(
                 User.id == user.id,
                 User.trial_match_used == False
@@ -104,13 +126,11 @@ def check_and_consume_quota(user: User, db: Session) -> None:
                 )
             return
 
-        # Trial expiré → quota cycle Stripe
-        # quota_override prioritaire sur PLAN_QUOTAS
-        quota = get_user_quota(user)
-        start, end = get_billing_period(user)
-        club_id = _get_solo_club_id(user, db)
-        # Exclure le match trial : ne compter que les matchs créés après fin trial
-        trial_cutoff = user.trial_ends_at or start
+        # Trial expiré → quota cycle Stripe (pool commun)
+        quota = get_user_quota(billing_user)
+        start, end = get_billing_period(billing_user)
+        club_id = billing_user.club_id or _get_solo_club_id(user, db)
+        trial_cutoff = billing_user.trial_ends_at or start
         count = db.query(Match).filter(
             Match.club_id == club_id,
             Match.created_at >= start,
@@ -122,7 +142,7 @@ def check_and_consume_quota(user: User, db: Session) -> None:
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
                 detail={
                     "code": "QUOTA_EXCEEDED",
-                    "plan": user.plan.value if hasattr(user.plan, 'value') else user.plan,
+                    "plan": billing_user.plan.value if hasattr(billing_user.plan, 'value') else billing_user.plan,
                     "quota": quota,
                     "used": count,
                     "resets_at": end.isoformat() + "Z",
@@ -238,11 +258,14 @@ async def get_quota_status(
     """
     now = datetime.utcnow()
 
+    # Résoudre l'utilisateur de facturation (pool commun club)
+    billing_user = get_billing_user(current_user, db)
+
     # ── Abonnement Stripe présent ──────────────────────────────────────
-    if current_user.stripe_subscription_id:
+    if billing_user.stripe_subscription_id:
         is_trialing = (
-            current_user.trial_ends_at is not None
-            and now < current_user.trial_ends_at
+            billing_user.trial_ends_at is not None
+            and now < billing_user.trial_ends_at
         )
         if is_trialing:
             return {
@@ -254,17 +277,17 @@ async def get_quota_status(
             }
 
         # Quota cycle Stripe — quota_override prioritaire
-        quota = get_user_quota(current_user)
-        start, end = get_billing_period(current_user)
-        club_id = _get_solo_club_id(current_user, db)
-        trial_cutoff = current_user.trial_ends_at or start
+        quota = get_user_quota(billing_user)
+        start, end = get_billing_period(billing_user)
+        club_id = billing_user.club_id or _get_solo_club_id(current_user, db)
+        trial_cutoff = billing_user.trial_ends_at or start
         used = db.query(Match).filter(
             Match.club_id == club_id,
             Match.created_at >= start,
             Match.created_at < end,
             Match.created_at >= trial_cutoff,
         ).count()
-        plan_label = current_user.plan.value if hasattr(current_user.plan, 'value') else current_user.plan
+        plan_label = billing_user.plan.value if hasattr(billing_user.plan, 'value') else billing_user.plan
         return {
             "plan": plan_label,
             "quota": quota,
