@@ -757,14 +757,18 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
     # ── J-3 avant fin trial — email de rappel automatique via Resend
     elif event['type'] == 'customer.subscription.trial_will_end':
         subscription = event['data']['object']
-        user = db.query(User).filter(
-            User.stripe_customer_id == subscription['customer']
-        ).first()
-        if user:
-            trial_end_ts = subscription.get('trial_end')
-            if trial_end_ts:
-                debit_date = _format_date_fr(trial_end_ts)
-                _send_trial_reminder_email(user.email, user.name, debit_date)
+        # Guard : ne pas envoyer si le sub est déjà active (end-trial déclenché)
+        if subscription.get('status') != 'trialing':
+            print(f"[INFO] trial_will_end skipped — sub status is {subscription.get('status')}")
+        else:
+            user = db.query(User).filter(
+                User.stripe_customer_id == subscription['customer']
+            ).first()
+            if user:
+                trial_end_ts = subscription.get('trial_end')
+                if trial_end_ts:
+                    debit_date = _format_date_fr(trial_end_ts)
+                    _send_trial_reminder_email(user.email, user.name, debit_date)
 
     # ── Premier prélèvement réussi après trial / renouvellement mensuel
     elif event['type'] == 'invoice.payment_succeeded':
@@ -777,28 +781,15 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                 user.is_active = True
                 # Sync billing period au renouvellement
                 sub_id = invoice.get('subscription')
-                period_end = None
                 if sub_id:
                     try:
                         sub = stripe.Subscription.retrieve(sub_id)
                         sub_dict = sub.to_dict() if hasattr(sub, 'to_dict') else dict(sub)
                         _sync_billing_period(user, sub_dict)
-                        period_end = sub_dict.get('current_period_end')
                     except Exception:
                         pass
                 db.commit()
-
-                # Email confirmation paiement — premier débit uniquement (pas renouvellements)
-                if invoice.get('billing_reason') == 'subscription_create':
-                    amount_paid = invoice.get('amount_paid', 0)
-                    amount_str = f"{amount_paid / 100:.0f}€" if amount_paid else "39€"
-                    _send_payment_confirmed_email(
-                        to_email=user.email,
-                        name=user.name or "Coach",
-                        plan=_plan_value(user),
-                        amount=amount_str,
-                        period_end=period_end,
-                    )
+                # Email confirmation paiement géré dans customer.subscription.updated (trialing→active)
 
     # ── Paiement échoué
     elif event['type'] == 'invoice.payment_failed':
