@@ -20,6 +20,16 @@ limiter = Limiter(key_func=get_remote_address)
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 resend.api_key = os.getenv("RESEND_API_KEY")
 
+MOIS_FR = {
+    1: "janvier", 2: "février", 3: "mars", 4: "avril", 5: "mai", 6: "juin",
+    7: "juillet", 8: "août", 9: "septembre", 10: "octobre", 11: "novembre", 12: "décembre",
+}
+
+def _format_date_fr(ts: int) -> str:
+    """Formate un timestamp Unix en date française : '11 mars 2026'."""
+    dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+    return f"{dt.day} {MOIS_FR[dt.month]} {dt.year}"
+
 # ⚠️  Mettre à jour dans Render > Environment Variables
 STRIPE_PRICE_COACH    = os.getenv("STRIPE_PRICE_COACH",    "price_coach_39")
 STRIPE_PRICE_CLUB_99  = os.getenv("STRIPE_PRICE_CLUB_99",  "price_club_99")
@@ -94,7 +104,7 @@ def _send_trial_welcome_email(to_email: str, name: str, trial_end: int):
         first_name = name.split()[0] if name else "Coach"
         debit_str = ""
         if trial_end:
-            debit_str = datetime.fromtimestamp(trial_end, tz=timezone.utc).strftime("%d %B %Y")
+            debit_str = _format_date_fr(trial_end)
         debit_row = ""
         if debit_str:
             debit_row = f"""
@@ -238,7 +248,7 @@ def _send_payment_confirmed_email(to_email: str, name: str, plan: str, amount: s
         plan_label = "Club Pro" if plan == "CLUB_PRO" else "Club" if plan == "CLUB" else "Coach"
         next_date = ""
         if period_end:
-            next_date = datetime.fromtimestamp(period_end, tz=timezone.utc).strftime("%d %B %Y")
+            next_date = _format_date_fr(period_end)
         next_row = ""
         if next_date:
             next_row = f"""
@@ -753,8 +763,7 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
         if user:
             trial_end_ts = subscription.get('trial_end')
             if trial_end_ts:
-                trial_end_dt = datetime.fromtimestamp(trial_end_ts, tz=timezone.utc)
-                debit_date   = trial_end_dt.strftime('%d %B %Y')
+                debit_date = _format_date_fr(trial_end_ts)
                 _send_trial_reminder_email(user.email, user.name, debit_date)
 
     # ── Premier prélèvement réussi après trial / renouvellement mensuel
@@ -839,6 +848,21 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                 if prev_status == 'trialing':
                     user.trial_ends_at = datetime.utcnow()
             db.commit()
+
+            # Email confirmation paiement — uniquement au passage trialing → active
+            if new_status == 'active':
+                prev_status = event['data'].get('previous_attributes', {}).get('status')
+                if prev_status == 'trialing':
+                    period_end = subscription.get('current_period_end')
+                    amount_raw = subscription.get('plan', {}).get('amount', 0)
+                    amount_str = f"{amount_raw / 100:.0f}€" if amount_raw else "39€"
+                    _send_payment_confirmed_email(
+                        to_email=user.email,
+                        name=user.name or "Coach",
+                        plan=_plan_value(user),
+                        amount=amount_str,
+                        period_end=period_end,
+                    )
 
     return {"status": "success"}
 
