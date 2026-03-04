@@ -56,51 +56,53 @@ def _verify_recaptcha(token: str) -> bool:
 
 
 def send_welcome_email(user_name: str, user_email: str, plan: str):
+    """Email post-signup (avant CB) — template crème, accueil + 1 match offert."""
     try:
-        plan_label = "Coach" if plan == "COACH" else "Club"
+        first_name = user_name.split()[0] if user_name else "Coach"
         resend.Emails.send({
-            "from": "INSIGHTBALL <contact@insightball.com>",
+            "from": "Insightball <contact@insightball.com>",
             "to": user_email,
-            "subject": f"Bienvenue sur INSIGHTBALL — Plan {plan_label}",
+            "subject": "Bienvenue sur Insightball",
             "html": f"""<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:0;background:#0a0908;font-family:monospace;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#0a0908;padding:40px 20px;">
+<body style="margin:0;padding:0;background:#f5f2eb;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f2eb;padding:40px 20px;">
     <tr><td align="center">
-      <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;">
+      <table width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;">
         <tr>
           <td style="padding:0 0 32px 0;">
-            <span style="font-size:22px;font-weight:900;letter-spacing:.06em;color:#f5f2eb;font-family:monospace;">
+            <span style="font-size:22px;font-weight:900;letter-spacing:.06em;color:#1a1916;font-family:'Courier New',monospace;">
               INSIGHT<span style="color:#c9a227;">BALL</span>
             </span>
           </td>
         </tr>
         <tr>
-          <td style="background:#0f0e0c;border:1px solid rgba(255,255,255,0.07);border-top:2px solid #c9a227;padding:36px 32px;">
-            <p style="margin:0 0 8px 0;font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:#c9a227;font-family:monospace;">Plan {plan_label}</p>
-            <h1 style="margin:0 0 20px 0;font-size:32px;text-transform:uppercase;color:#f5f2eb;font-family:monospace;letter-spacing:.03em;line-height:1.1;">
-              Bienvenue,<br/>{user_name} !
+          <td style="background:#ffffff;border:1px solid rgba(26,25,22,0.09);border-top:2px solid #c9a227;padding:36px 32px;">
+            <p style="margin:0 0 10px 0;font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:#c9a227;font-family:'Courier New',monospace;">Inscription confirmée</p>
+            <h1 style="margin:0 0 20px 0;font-size:28px;color:#1a1916;font-family:'Courier New',monospace;letter-spacing:.02em;line-height:1.2;">
+              Bienvenue,<br/>{first_name} !
             </h1>
             <div style="width:40px;height:2px;background:#c9a227;margin-bottom:24px;"></div>
-            <p style="margin:0 0 28px 0;font-size:13px;color:rgba(245,242,235,0.55);line-height:1.7;font-family:monospace;letter-spacing:.03em;">
-              Ton compte est prêt. Tu peux dès maintenant analyser tes matchs,
-              suivre tes joueurs et améliorer les performances de ton équipe.
+            <p style="margin:0 0 24px 0;font-size:14px;color:rgba(26,25,22,0.6);line-height:1.75;">
+              Merci d'avoir rejoint Insightball.<br/>
+              Votre compte est créé — il ne reste plus qu'à activer votre essai gratuit pour lancer votre première analyse.
             </p>
-            <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:32px;">
+            <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
               <tr>
-                <td style="background:rgba(201,162,39,0.06);border:1px solid rgba(201,162,39,0.15);padding:20px 24px;">
-                  <p style="margin:0 0 12px 0;font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:#c9a227;font-family:monospace;">Ce que tu peux faire</p>
-                  {''.join([f'<p style="margin:0 0 8px 0;font-size:12px;color:rgba(245,242,235,0.6);font-family:monospace;letter-spacing:.03em;">→ {feat}</p>' for feat in ['Uploader et analyser tes matchs', 'Gérer tes joueurs et leurs stats', 'Visualiser les performances', 'Créer des compositions tactiques']])}
+                <td style="background:rgba(201,162,39,0.06);border:1px solid rgba(201,162,39,0.18);border-left:3px solid #c9a227;padding:18px 22px;">
+                  <p style="margin:0 0 6px 0;font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:#c9a227;font-family:'Courier New',monospace;font-weight:700;">Votre offre de bienvenue</p>
+                  <p style="margin:0;font-size:20px;color:#1a1916;font-family:'Courier New',monospace;font-weight:900;letter-spacing:.02em;">1 match analysé offert</p>
+                  <p style="margin:6px 0 0 0;font-size:12px;color:rgba(26,25,22,0.45);">Rapport tactique complet · Heatmaps · Stats · Export PDF</p>
                 </td>
               </tr>
             </table>
             <table cellpadding="0" cellspacing="0">
               <tr>
                 <td style="background:#c9a227;">
-                  <a href="https://www.insightball.com/x-portal-7f2a/login"
-                     style="display:inline-block;padding:14px 32px;color:#0f0f0d;font-family:monospace;font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;text-decoration:none;">
-                    ACCÉDER AU DASHBOARD →
+                  <a href="https://insightball.com/dashboard"
+                     style="display:inline-block;padding:14px 28px;color:#0f0f0d;font-family:'Courier New',monospace;font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;text-decoration:none;">
+                    Activer mon essai gratuit →
                   </a>
                 </td>
               </tr>
@@ -109,7 +111,8 @@ def send_welcome_email(user_name: str, user_email: str, plan: str):
         </tr>
         <tr>
           <td style="padding:24px 0 0 0;">
-            <p style="margin:0;font-size:10px;color:rgba(245,242,235,0.2);font-family:monospace;letter-spacing:.04em;">
+            <p style="margin:0;font-size:10px;color:rgba(26,25,22,0.3);font-family:'Courier New',monospace;letter-spacing:.04em;">
+              Insightball · Football Analytics<br/>
               <a href="mailto:contact@insightball.com" style="color:#c9a227;text-decoration:none;">contact@insightball.com</a>
             </p>
           </td>
@@ -230,9 +233,9 @@ def send_reset_email(user_name: str, user_email: str, reset_token: str):
     try:
         reset_url = f"https://www.insightball.com/reset-password?token={reset_token}"
         resend.Emails.send({
-            "from": "INSIGHTBALL <contact@insightball.com>",
+            "from": "Insightball <contact@insightball.com>",
             "to": user_email,
-            "subject": "Réinitialisation de votre mot de passe — INSIGHTBALL",
+            "subject": "Réinitialisation de votre mot de passe — Insightball",
             "html": f"""<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>

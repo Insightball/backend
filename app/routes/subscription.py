@@ -84,7 +84,7 @@ def _sync_billing_period(user, subscription):
 
 
 def _send_trial_welcome_email(to_email: str, name: str, trial_end: int):
-    """Email de bienvenue apres activation du trial. Non bloquant."""
+    """Email post-activation trial (CB enregistrée) — template dark, récap conditions."""
     resend_key = os.getenv("RESEND_API_KEY")
     if not resend_key:
         print(f"[WARN] RESEND_API_KEY manquant — welcome email non envoye a {to_email}")
@@ -94,43 +94,91 @@ def _send_trial_welcome_email(to_email: str, name: str, trial_end: int):
         debit_str = ""
         if trial_end:
             debit_str = datetime.fromtimestamp(trial_end, tz=timezone.utc).strftime("%d %B %Y")
-        debit_line = (
-            f'<p style="font-size:12px;color:rgba(15,15,13,0.45);margin:16px 0;">'
-            f'Votre carte sera debitee le <strong>{debit_str}</strong> sauf resiliation avant cette date.</p>'
-        ) if debit_str else ""
+        debit_row = ""
+        if debit_str:
+            debit_row = f"""
+                <tr><td style="padding:12px 0 0 0;"><table width="100%" cellpadding="0" cellspacing="0"><tr>
+                  <td style="font-size:11px;color:rgba(245,242,235,0.4);font-family:'Courier New',monospace;letter-spacing:.06em;text-transform:uppercase;">Premier débit</td>
+                  <td align="right" style="font-size:14px;color:#f5f2eb;font-family:'Courier New',monospace;font-weight:700;">{debit_str}</td>
+                </tr></table></td></tr>"""
         status = _resend_post(resend_key, {
-            "from":    "InsightBall <contact@insightball.com>",
+            "from":    "Insightball <contact@insightball.com>",
             "to":      [to_email],
-            "subject": "Votre essai InsightBall est active - 1 match offert",
-            "html": f"""
-            <div style="font-family:monospace;max-width:520px;margin:0 auto;padding:32px 24px;background:#faf8f4;">
-              <div style="font-size:22px;font-weight:900;text-transform:uppercase;letter-spacing:.04em;margin-bottom:24px;">
-                INSIGHT<span style="color:#c9a227;">BALL</span>
-              </div>
-              <p style="font-size:15px;color:#2a2a26;line-height:1.6;">Bonjour {first_name},</p>
-              <p style="font-size:14px;color:#2a2a26;line-height:1.7;">
-                Votre essai gratuit est active. Vous avez <strong>7 jours</strong> et <strong>1 match offert</strong> pour decouvrir InsightBall.
-              </p>
-              <div style="background:#fff;border:1px solid rgba(15,15,13,0.09);border-left:3px solid #c9a227;padding:14px 18px;margin:20px 0;">
-                <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#c9a227;margin-bottom:8px;">Ce qui vous attend</div>
-                <div style="font-size:12px;color:rgba(15,15,13,0.65);line-height:1.8;">
-                  - Uploadez votre video de match<br/>
-                  - Recevez un rapport tactique complet<br/>
-                  - Heatmaps, stats individuelles et collectives<br/>
-                  - Export PDF
-                </div>
-              </div>
-              {debit_line}
-              <a href="https://insightball.com/dashboard/matches/upload"
-                 style="display:inline-block;padding:12px 24px;background:#c9a227;color:#0f0f0d;font-size:11px;letter-spacing:.1em;text-transform:uppercase;font-weight:700;text-decoration:none;margin-top:8px;">
-                Analyser mon premier match
-              </a>
-              <p style="font-size:11px;color:rgba(15,15,13,0.35);margin-top:28px;line-height:1.6;">
-                InsightBall - contact@insightball.com<br/>
-                Resiliation : Parametres - Gerer mon abonnement
-              </p>
-            </div>
-            """,
+            "subject": "Votre essai Insightball est activé — analysez votre premier match",
+            "html": f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#0a0908;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#0a0908;padding:40px 20px;">
+    <tr><td align="center">
+      <table width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;">
+        <tr>
+          <td style="padding:0 0 32px 0;">
+            <span style="font-size:22px;font-weight:900;letter-spacing:.06em;color:#f5f2eb;font-family:'Courier New',monospace;">
+              INSIGHT<span style="color:#c9a227;">BALL</span>
+            </span>
+          </td>
+        </tr>
+        <tr>
+          <td style="background:#0f0e0c;border:1px solid rgba(255,255,255,0.07);border-top:2px solid #c9a227;padding:36px 32px;">
+            <p style="margin:0 0 10px 0;font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:#c9a227;font-family:'Courier New',monospace;">Plan Coach · Essai activé</p>
+            <h1 style="margin:0 0 20px 0;font-size:26px;color:#f5f2eb;font-family:'Courier New',monospace;letter-spacing:.02em;line-height:1.2;">
+              C'est parti, {first_name}.
+            </h1>
+            <div style="width:40px;height:2px;background:#c9a227;margin-bottom:24px;"></div>
+            <p style="margin:0 0 24px 0;font-size:14px;color:rgba(245,242,235,0.6);line-height:1.75;">
+              Votre essai gratuit est maintenant actif. Uploadez votre vidéo de match et recevez votre rapport tactique complet.
+            </p>
+            <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
+              <tr>
+                <td style="background:rgba(201,162,39,0.06);border:1px solid rgba(201,162,39,0.15);padding:20px 22px;">
+                  <table width="100%" cellpadding="0" cellspacing="0">
+                    <tr><td style="padding:0 0 12px 0;border-bottom:1px solid rgba(255,255,255,0.05);"><table width="100%" cellpadding="0" cellspacing="0"><tr>
+                      <td style="font-size:11px;color:rgba(245,242,235,0.4);font-family:'Courier New',monospace;letter-spacing:.06em;text-transform:uppercase;">Durée</td>
+                      <td align="right" style="font-size:14px;color:#f5f2eb;font-family:'Courier New',monospace;font-weight:700;">7 jours</td>
+                    </tr></table></td></tr>
+                    <tr><td style="padding:12px 0;border-bottom:1px solid rgba(255,255,255,0.05);"><table width="100%" cellpadding="0" cellspacing="0"><tr>
+                      <td style="font-size:11px;color:rgba(245,242,235,0.4);font-family:'Courier New',monospace;letter-spacing:.06em;text-transform:uppercase;">Matchs offerts</td>
+                      <td align="right" style="font-size:14px;color:#f5f2eb;font-family:'Courier New',monospace;font-weight:700;">1 match</td>
+                    </tr></table></td></tr>
+                    <tr><td style="padding:12px 0 0 0;border-bottom:1px solid rgba(255,255,255,0.05);"><table width="100%" cellpadding="0" cellspacing="0"><tr>
+                      <td style="font-size:11px;color:rgba(245,242,235,0.4);font-family:'Courier New',monospace;letter-spacing:.06em;text-transform:uppercase;">Après l'essai</td>
+                      <td align="right" style="font-size:14px;color:#c9a227;font-family:'Courier New',monospace;font-weight:700;">39€/mois</td>
+                    </tr></table></td></tr>
+                    {debit_row}
+                  </table>
+                </td>
+              </tr>
+            </table>
+            <table cellpadding="0" cellspacing="0" style="margin-bottom:20px;">
+              <tr>
+                <td style="background:#c9a227;">
+                  <a href="https://insightball.com/dashboard/matches/upload"
+                     style="display:inline-block;padding:14px 28px;color:#0f0f0d;font-family:'Courier New',monospace;font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;text-decoration:none;">
+                    Analyser mon premier match →
+                  </a>
+                </td>
+              </tr>
+            </table>
+            <p style="margin:0;font-size:11px;color:rgba(245,242,235,0.3);line-height:1.6;">
+              Résiliation en 1 clic depuis Paramètres → Gérer mon abonnement.<br/>
+              Aucun prélèvement si vous annulez avant la fin de l'essai.
+            </p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:24px 0 0 0;">
+            <p style="margin:0;font-size:10px;color:rgba(245,242,235,0.2);font-family:'Courier New',monospace;letter-spacing:.04em;">
+              Insightball · Football Analytics<br/>
+              <a href="mailto:contact@insightball.com" style="color:#c9a227;text-decoration:none;">contact@insightball.com</a>
+            </p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>""",
         })
         if status not in (200, 201):
             print(f"[WARN] Resend welcome failed {status}")
@@ -149,9 +197,9 @@ def _send_trial_reminder_email(to_email: str, name: str, debit_date: str):
     try:
         first_name = name.split()[0] if name else "Coach"
         status = _resend_post(resend_key, {
-            "from":    "InsightBall <contact@insightball.com>",
+            "from":    "Insightball <contact@insightball.com>",
             "to":      [to_email],
-            "subject": "Votre essai InsightBall se termine dans 2 jours",
+            "subject": "Votre essai Insightball se termine dans 2 jours",
             "html": f"""
             <div style="font-family:monospace;max-width:520px;margin:0 auto;padding:32px 24px;background:#faf8f4;">
               <div style="font-size:22px;font-weight:900;text-transform:uppercase;letter-spacing:.04em;margin-bottom:24px;">
@@ -173,7 +221,7 @@ def _send_trial_reminder_email(to_email: str, name: str, debit_date: str):
                 Gerer mon abonnement
               </a>
               <p style="font-size:11px;color:rgba(15,15,13,0.35);margin-top:28px;line-height:1.6;">
-                InsightBall - contact@insightball.com
+                Insightball - contact@insightball.com
               </p>
             </div>
             """,
@@ -695,7 +743,7 @@ async def request_club_quote(
 ):
     """
     Envoie une demande de devis CLUB par email via Resend.
-    Pas de création de subscription Stripe — traitement manuel par l'équipe InsightBall.
+    Pas de création de subscription Stripe — traitement manuel par l'équipe Insightball.
     """
     resend_key = os.getenv("RESEND_API_KEY")
     if not resend_key:
@@ -707,7 +755,7 @@ async def request_club_quote(
 
     try:
         status = _resend_post(resend_key, {
-            "from":    "InsightBall <contact@insightball.com>",
+            "from":    "Insightball <contact@insightball.com>",
             "to":      ["contact@insightball.com"],
             "subject": f"Demande de devis CLUB — {current_user.name}",
             "html": f"""
