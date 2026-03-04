@@ -757,9 +757,17 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
     # ── J-3 avant fin trial — email de rappel automatique via Resend
     elif event['type'] == 'customer.subscription.trial_will_end':
         subscription = event['data']['object']
-        # Guard : ne pas envoyer si le sub est déjà active (end-trial déclenché)
-        if subscription.get('status') != 'trialing':
-            print(f"[INFO] trial_will_end skipped — sub status is {subscription.get('status')}")
+        sub_id = subscription.get('id')
+        # Guard : vérifier le status RÉEL Stripe (pas celui de l'event, qui peut être stale)
+        real_status = None
+        if sub_id:
+            try:
+                real_sub = stripe.Subscription.retrieve(sub_id)
+                real_status = real_sub.status
+            except Exception:
+                pass
+        if real_status and real_status != 'trialing':
+            print(f"[INFO] trial_will_end skipped — real sub status is {real_status}")
         else:
             user = db.query(User).filter(
                 User.stripe_customer_id == subscription['customer']
