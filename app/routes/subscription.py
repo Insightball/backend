@@ -3,6 +3,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 import stripe
+import resend
 import os
 from datetime import datetime, timezone
 
@@ -17,6 +18,7 @@ router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)
 
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
+resend.api_key = os.getenv("RESEND_API_KEY")
 
 # ⚠️  Mettre à jour dans Render > Environment Variables
 STRIPE_PRICE_COACH    = os.getenv("STRIPE_PRICE_COACH",    "price_coach_39")
@@ -84,9 +86,8 @@ def _sync_billing_period(user, subscription):
 
 
 def _send_trial_welcome_email(to_email: str, name: str, trial_end: int):
-    """Email post-activation trial (CB enregistrée) — template dark, récap conditions."""
-    resend_key = os.getenv("RESEND_API_KEY")
-    if not resend_key:
+    """Email post-activation trial (CB enregistrée) — template dark, récap conditions. SDK Resend."""
+    if not resend.api_key:
         print(f"[WARN] RESEND_API_KEY manquant — welcome email non envoye a {to_email}")
         return
     try:
@@ -101,9 +102,9 @@ def _send_trial_welcome_email(to_email: str, name: str, trial_end: int):
                   <td style="font-size:11px;color:rgba(245,242,235,0.4);font-family:'Courier New',monospace;letter-spacing:.06em;text-transform:uppercase;">Premier débit</td>
                   <td align="right" style="font-size:14px;color:#f5f2eb;font-family:'Courier New',monospace;font-weight:700;">{debit_str}</td>
                 </tr></table></td></tr>"""
-        status = _resend_post(resend_key, {
-            "from":    "Insightball <contact@insightball.com>",
-            "to":      [to_email],
+        resend.Emails.send({
+            "from": "Insightball <contact@insightball.com>",
+            "to": to_email,
             "subject": "Votre essai Insightball est activé — analysez votre premier match",
             "html": f"""<!DOCTYPE html>
 <html>
@@ -178,27 +179,23 @@ def _send_trial_welcome_email(to_email: str, name: str, trial_end: int):
     </td></tr>
   </table>
 </body>
-</html>""",
+</html>"""
         })
-        if status not in (200, 201):
-            print(f"[WARN] Resend welcome failed {status}")
-        else:
-            print(f"[INFO] Welcome email envoye a {to_email}")
+        print(f"[INFO] Welcome email envoye a {to_email}")
     except Exception as e:
         print(f"[ERR] Welcome email failed: {e}")
 
 
 def _send_trial_reminder_email(to_email: str, name: str, debit_date: str):
-    """Rappel J-3 avant fin trial via Resend. Non bloquant."""
-    resend_key = os.getenv("RESEND_API_KEY")
-    if not resend_key:
+    """Rappel J-3 avant fin trial via SDK Resend. Non bloquant."""
+    if not resend.api_key:
         print(f"[WARN] RESEND_API_KEY manquant — email non envoyé à {to_email}")
         return
     try:
         first_name = name.split()[0] if name else "Coach"
-        status = _resend_post(resend_key, {
-            "from":    "Insightball <contact@insightball.com>",
-            "to":      [to_email],
+        resend.Emails.send({
+            "from": "Insightball <contact@insightball.com>",
+            "to": to_email,
             "subject": "Votre essai Insightball se termine dans 2 jours",
             "html": f"""
             <div style="font-family:monospace;max-width:520px;margin:0 auto;padding:32px 24px;background:#faf8f4;">
@@ -226,10 +223,7 @@ def _send_trial_reminder_email(to_email: str, name: str, debit_date: str):
             </div>
             """,
         })
-        if status not in (200, 201):
-            print(f"[WARN] Resend failed {status}")
-        else:
-            print(f"[INFO] Rappel trial envoye a {to_email}")
+        print(f"[INFO] Rappel trial envoye a {to_email}")
     except Exception as e:
         print(f"[ERR] Email reminder failed: {e}")
 
