@@ -228,6 +228,116 @@ def _send_trial_reminder_email(to_email: str, name: str, debit_date: str):
         print(f"[ERR] Email reminder failed: {e}")
 
 
+def _send_payment_confirmed_email(to_email: str, name: str, plan: str, amount: str, period_end: int):
+    """Email confirmation premier paiement — template crème. SDK Resend. Non bloquant."""
+    if not resend.api_key:
+        print(f"[WARN] RESEND_API_KEY manquant — email paiement non envoye a {to_email}")
+        return
+    try:
+        first_name = name.split()[0] if name else "Coach"
+        plan_label = "Club Pro" if plan == "CLUB_PRO" else "Club" if plan == "CLUB" else "Coach"
+        next_date = ""
+        if period_end:
+            next_date = datetime.fromtimestamp(period_end, tz=timezone.utc).strftime("%d %B %Y")
+        next_row = ""
+        if next_date:
+            next_row = f"""
+              <tr>
+                <td style="padding:12px 0 0 0;border-top:1px solid rgba(26,25,22,0.06);">
+                  <table width="100%" cellpadding="0" cellspacing="0"><tr>
+                    <td style="font-size:11px;color:rgba(26,25,22,0.4);font-family:'Courier New',monospace;letter-spacing:.06em;text-transform:uppercase;">Prochain renouvellement</td>
+                    <td align="right" style="font-size:14px;color:#1a1916;font-family:'Courier New',monospace;font-weight:700;">{next_date}</td>
+                  </tr></table>
+                </td>
+              </tr>"""
+        resend.Emails.send({
+            "from": "Insightball <contact@insightball.com>",
+            "to": to_email,
+            "subject": f"Paiement confirmé — Plan {plan_label} activé",
+            "html": f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f5f2eb;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f2eb;padding:40px 20px;">
+    <tr><td align="center">
+      <table width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;">
+        <tr>
+          <td style="padding:0 0 32px 0;">
+            <span style="font-size:22px;font-weight:900;letter-spacing:.06em;color:#1a1916;font-family:'Courier New',monospace;">
+              INSIGHT<span style="color:#c9a227;">BALL</span>
+            </span>
+          </td>
+        </tr>
+        <tr>
+          <td style="background:#ffffff;border:1px solid rgba(26,25,22,0.09);border-top:2px solid #c9a227;padding:36px 32px;">
+            <p style="margin:0 0 10px 0;font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:#c9a227;font-family:'Courier New',monospace;">Paiement confirmé</p>
+            <h1 style="margin:0 0 20px 0;font-size:26px;color:#1a1916;font-family:'Courier New',monospace;letter-spacing:.02em;line-height:1.2;">
+              Votre plan {plan_label}<br/>est actif, {first_name}.
+            </h1>
+            <div style="width:40px;height:2px;background:#c9a227;margin-bottom:24px;"></div>
+            <p style="margin:0 0 24px 0;font-size:14px;color:rgba(26,25,22,0.6);line-height:1.75;">
+              Merci pour votre confiance. Votre abonnement est maintenant actif — vous avez accès à toutes les fonctionnalités de votre plan.
+            </p>
+            <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
+              <tr>
+                <td style="background:rgba(201,162,39,0.06);border:1px solid rgba(201,162,39,0.18);padding:20px 22px;">
+                  <table width="100%" cellpadding="0" cellspacing="0">
+                    <tr>
+                      <td style="padding:0 0 12px 0;border-bottom:1px solid rgba(26,25,22,0.06);">
+                        <table width="100%" cellpadding="0" cellspacing="0"><tr>
+                          <td style="font-size:11px;color:rgba(26,25,22,0.4);font-family:'Courier New',monospace;letter-spacing:.06em;text-transform:uppercase;">Plan</td>
+                          <td align="right" style="font-size:14px;color:#1a1916;font-family:'Courier New',monospace;font-weight:700;">{plan_label}</td>
+                        </tr></table>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style="padding:12px 0 0 0;border-bottom:1px solid rgba(26,25,22,0.06);">
+                        <table width="100%" cellpadding="0" cellspacing="0"><tr>
+                          <td style="font-size:11px;color:rgba(26,25,22,0.4);font-family:'Courier New',monospace;letter-spacing:.06em;text-transform:uppercase;">Montant</td>
+                          <td align="right" style="font-size:14px;color:#c9a227;font-family:'Courier New',monospace;font-weight:700;">{amount}</td>
+                        </tr></table>
+                      </td>
+                    </tr>
+                    {next_row}
+                  </table>
+                </td>
+              </tr>
+            </table>
+            <table cellpadding="0" cellspacing="0" style="margin-bottom:20px;">
+              <tr>
+                <td style="background:#c9a227;">
+                  <a href="https://insightball.com/dashboard/matches/upload"
+                     style="display:inline-block;padding:14px 28px;color:#0f0f0d;font-family:'Courier New',monospace;font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;text-decoration:none;">
+                    Analyser un match →
+                  </a>
+                </td>
+              </tr>
+            </table>
+            <p style="margin:0;font-size:11px;color:rgba(26,25,22,0.35);line-height:1.6;">
+              Gérez votre abonnement à tout moment depuis Paramètres.<br/>
+              Une question ? contact@insightball.com
+            </p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:24px 0 0 0;">
+            <p style="margin:0;font-size:10px;color:rgba(26,25,22,0.3);font-family:'Courier New',monospace;letter-spacing:.04em;">
+              Insightball · Football Analytics<br/>
+              <a href="mailto:contact@insightball.com" style="color:#c9a227;text-decoration:none;">contact@insightball.com</a>
+            </p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>"""
+        })
+        print(f"[INFO] Payment confirmed email envoye a {to_email}")
+    except Exception as e:
+        print(f"[ERR] Payment confirmed email failed: {e}")
+
+
 # ─────────────────────────────────────────────
 # MODELS
 # ─────────────────────────────────────────────
@@ -658,14 +768,28 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                 user.is_active = True
                 # Sync billing period au renouvellement
                 sub_id = invoice.get('subscription')
+                period_end = None
                 if sub_id:
                     try:
                         sub = stripe.Subscription.retrieve(sub_id)
                         sub_dict = sub.to_dict() if hasattr(sub, 'to_dict') else dict(sub)
                         _sync_billing_period(user, sub_dict)
+                        period_end = sub_dict.get('current_period_end')
                     except Exception:
                         pass
                 db.commit()
+
+                # Email confirmation paiement — premier débit uniquement (pas renouvellements)
+                if invoice.get('billing_reason') == 'subscription_create':
+                    amount_paid = invoice.get('amount_paid', 0)
+                    amount_str = f"{amount_paid / 100:.0f}€" if amount_paid else "39€"
+                    _send_payment_confirmed_email(
+                        to_email=user.email,
+                        name=user.name or "Coach",
+                        plan=_plan_value(user),
+                        amount=amount_str,
+                        period_end=period_end,
+                    )
 
     # ── Paiement échoué
     elif event['type'] == 'invoice.payment_failed':
