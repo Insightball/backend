@@ -26,7 +26,7 @@ resend.api_key = os.getenv("RESEND_API_KEY")
 # Source de vérité pour les quotas — aligné avec matches.py
 PLAN_QUOTAS = {
     PlanType.COACH: 4,
-    PlanType.CLUB: 12,
+    PlanType.CLUB: 10,
 }
 
 
@@ -231,7 +231,7 @@ async def get_current_user_info(current_user: User = Depends(get_current_user)):
 
 def send_reset_email(user_name: str, user_email: str, reset_token: str):
     try:
-        reset_url = f"https://www.insightball.com/reset-password?token={reset_token}"
+        reset_url = f"https://insightball.com/reset-password?token={reset_token}"
         resend.Emails.send({
             "from": "Insightball <contact@insightball.com>",
             "to": user_email,

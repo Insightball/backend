@@ -27,6 +27,11 @@ async def get_presigned_upload_url(
 ):
     """Get a presigned URL for uploading a video to S3"""
     
+    # Validation type MIME — sécurité upload
+    allowed_video_types = ['video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/webm']
+    if request.content_type not in allowed_video_types:
+        raise HTTPException(status_code=400, detail="Type de fichier non autorisé. Utilisez MP4, MOV, AVI ou WEBM.")
+    
     try:
         # Generate unique file key
         file_extension = request.filename.split('.')[-1]

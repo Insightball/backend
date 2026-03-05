@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, EmailStr
 from typing import Optional
@@ -7,6 +7,8 @@ import uuid
 
 from app.database import get_db
 from app.models.lead import Lead
+from app.models import User
+from app.dependencies import get_current_user
 
 router = APIRouter()
 
@@ -58,5 +60,7 @@ async def contact(data: ContactRequest, db: Session = Depends(get_db)):
     return { "status": "ok" }
 
 @router.get("/list")
-async def list_leads(db: Session = Depends(get_db)):
+async def list_leads(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    if not current_user.is_superadmin:
+        raise HTTPException(status_code=403, detail="Accès refusé")
     return db.query(Lead).order_by(Lead.created_at.desc()).all()

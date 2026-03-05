@@ -59,7 +59,7 @@ def send_invitation_email(invitee_email: str, club_name: str, inviter_name: str,
     role_labels = {"ADMIN": "Administrateur", "COACH": "Coach", "ANALYST": "Analyste"}
     role_label = role_labels.get(role, role)
     category_text = f" — {category}" if category else ""
-    accept_url = f"https://www.insightball.com/join?token={token}"
+    accept_url = f"https://insightball.com/join?token={token}"
     try:
         resend.Emails.send({
             "from": "INSIGHTBALL <contact@insightball.com>",

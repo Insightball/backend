@@ -23,7 +23,7 @@ RECOVERY_DAYS = 30
 # ─── Email suppression avec lien de récupération ─────────────────────────────
 
 def send_deletion_email(user_name: str, user_email: str, recovery_token: str):
-    recovery_url = f"https://www.insightball.com/recover?token={recovery_token}"
+    recovery_url = f"https://insightball.com/recover?token={recovery_token}"
     deadline = (datetime.utcnow() + timedelta(days=RECOVERY_DAYS)).strftime("%d/%m/%Y")
 
     try:
@@ -152,7 +152,7 @@ def send_recovery_email(user_name: str, user_email: str):
             <table cellpadding="0" cellspacing="0">
               <tr>
                 <td style="background:#c9a227;">
-                  <a href="https://www.insightball.com/x-portal-7f2a/login"
+                  <a href="https://insightball.com/x-portal-7f2a/login"
                      style="display:inline-block;padding:14px 32px;color:#0f0f0d;font-family:monospace;font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;text-decoration:none;">
                     ACCÉDER AU DASHBOARD →
                   </a>
