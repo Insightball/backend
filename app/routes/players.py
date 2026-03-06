@@ -6,6 +6,7 @@ import uuid
 from app.database import get_db
 from app.models import User
 from app.models import Player
+from app.models import Match, MatchStatus
 from app.schemas.player import PlayerCreate, PlayerResponse, PlayerUpdate
 from app.dependencies import get_current_active_user
 
@@ -164,3 +165,134 @@ async def delete_player(
     db.commit()
     
     return None
+
+
+@router.get("/{player_id}/stats")
+async def get_player_stats(
+    player_id: str,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Aggregate player stats from all completed matches"""
+
+    # Vérifier que le joueur appartient au club
+    player = db.query(Player).filter(
+        Player.id == player_id,
+        Player.club_id == current_user.club_id
+    ).first()
+
+    if not player:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Joueur non trouvé"
+        )
+
+    # Récupérer tous les matchs completed du club qui ont des player_stats
+    matches = db.query(Match).filter(
+        Match.club_id == current_user.club_id,
+        Match.status == MatchStatus.COMPLETED,
+        Match.player_stats != None,
+    ).order_by(Match.date.desc()).all()
+
+    # Agréger les stats
+    total_matches = 0
+    total_starter = 0
+    total_sub = 0
+    total_minutes = 0
+    total_goals = 0
+    total_assists = 0
+    total_passes = 0
+    total_pass_success_sum = 0
+    total_pass_success_count = 0
+    total_shots = 0
+    total_shots_on_target = 0
+    total_duels = 0
+    total_duels_won = 0
+    total_distance = 0.0
+    total_key_passes = 0
+    total_tackles = 0
+    total_interceptions = 0
+    total_saves = 0
+    total_yellow_cards = 0
+    match_history = []
+
+    for match in matches:
+        ps_list = match.player_stats
+        if not isinstance(ps_list, list):
+            continue
+
+        for ps in ps_list:
+            if ps.get("player_id") != player_id:
+                continue
+
+            # Ce joueur a participé à ce match
+            total_matches += 1
+            is_starter = ps.get("starter", False)
+            if is_starter:
+                total_starter += 1
+            else:
+                total_sub += 1
+
+            minutes = ps.get("minutes", 0)
+            total_minutes += minutes
+            total_goals += ps.get("goals", 0)
+            total_assists += ps.get("assists", 0)
+            total_passes += ps.get("passes", 0)
+            if ps.get("pass_success") is not None:
+                total_pass_success_sum += ps["pass_success"]
+                total_pass_success_count += 1
+            total_shots += ps.get("shots", 0)
+            total_shots_on_target += ps.get("shots_on_target", 0)
+            total_duels += ps.get("duels", 0)
+            total_duels_won += ps.get("duels_won", 0)
+            total_distance += ps.get("distance_km", 0.0)
+            total_key_passes += ps.get("key_passes", 0)
+            total_tackles += ps.get("tackles", 0)
+            total_interceptions += ps.get("interceptions", 0)
+            total_saves += ps.get("saves", 0)
+            if ps.get("yellow_card"):
+                total_yellow_cards += 1
+
+            # Historique match
+            match_history.append({
+                "match_id": match.id,
+                "opponent": match.opponent,
+                "date": match.date.isoformat() if match.date else None,
+                "score_home": match.score_home,
+                "score_away": match.score_away,
+                "is_home": match.is_home,
+                "competition": match.competition,
+                "starter": is_starter,
+                "minutes": minutes,
+                "goals": ps.get("goals", 0),
+                "assists": ps.get("assists", 0),
+                "rating": ps.get("rating"),
+            })
+            break  # Un joueur ne peut apparaître qu'une fois par match
+
+    avg_pass_success = round(total_pass_success_sum / total_pass_success_count, 1) if total_pass_success_count > 0 else None
+    avg_distance = round(total_distance / total_matches, 1) if total_matches > 0 else None
+
+    return {
+        "player_id": player_id,
+        "matches_played": total_matches,
+        "matches_starter": total_starter,
+        "matches_sub": total_sub,
+        "total_minutes": total_minutes,
+        "goals": total_goals,
+        "assists": total_assists,
+        "total_passes": total_passes,
+        "avg_pass_success": avg_pass_success,
+        "total_shots": total_shots,
+        "shots_on_target": total_shots_on_target,
+        "total_duels": total_duels,
+        "duels_won": total_duels_won,
+        "total_distance_km": round(total_distance, 1),
+        "avg_distance_km": avg_distance,
+        "total_key_passes": total_key_passes,
+        "total_tackles": total_tackles,
+        "total_interceptions": total_interceptions,
+        "total_saves": total_saves,
+        "yellow_cards": total_yellow_cards,
+        "match_history": match_history,
+    }
