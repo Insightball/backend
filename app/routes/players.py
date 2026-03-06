@@ -7,10 +7,33 @@ from app.database import get_db
 from app.models import User
 from app.models import Player
 from app.models import Match, MatchStatus
+from app.models.club_member import ClubMember, InviteStatus
 from app.schemas.player import PlayerCreate, PlayerResponse, PlayerUpdate
 from app.dependencies import get_current_active_user
 
 router = APIRouter()
+
+
+def _get_managed_category(user: User, db: Session) -> str | None:
+    """
+    Retourne la catégorie assignée au coach membre via ClubMember.
+    DS admin / superadmin → None (voit tout).
+    Coach membre → sa catégorie (ex: 'U19', 'Seniors').
+    """
+    if user.is_superadmin:
+        return None
+    role_val = user.role.value if hasattr(user.role, 'value') else user.role
+    if role_val == 'ADMIN':
+        return None
+    # Coach membre → chercher sa catégorie dans club_members
+    member = db.query(ClubMember).filter(
+        ClubMember.user_id == user.id,
+        ClubMember.club_id == user.club_id,
+        ClubMember.status == InviteStatus.ACCEPTED,
+    ).first()
+    if member and member.category:
+        return member.category
+    return None
 
 @router.post("/", response_model=PlayerResponse, status_code=status.HTTP_201_CREATED)
 async def create_player(
@@ -19,6 +42,14 @@ async def create_player(
     db: Session = Depends(get_db)
 ):
     """Create a new player"""
+    
+    # Coach membre → force la catégorie assignée
+    managed_cat = _get_managed_category(current_user, db)
+    if managed_cat and player_data.category != managed_cat:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Vous ne pouvez créer des joueurs que dans la catégorie {managed_cat}"
+        )
     
     # Check if number already exists for this category
     existing = db.query(Player).filter(
@@ -65,6 +96,11 @@ async def get_players(
     
     query = db.query(Player).filter(Player.club_id == current_user.club_id)
     
+    # Coach membre → ne voit que les joueurs de sa catégorie
+    managed_cat = _get_managed_category(current_user, db)
+    if managed_cat:
+        query = query.filter(Player.category == managed_cat)
+    
     # Apply filters
     if category:
         query = query.filter(Player.category == category)
@@ -95,6 +131,14 @@ async def get_player(
             detail="Joueur non trouvé"
         )
     
+    # Coach membre → accès uniquement aux joueurs de sa catégorie
+    managed_cat = _get_managed_category(current_user, db)
+    if managed_cat and player.category != managed_cat:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Joueur non trouvé"
+        )
+    
     return player
 
 @router.patch("/{player_id}", response_model=PlayerResponse)
@@ -115,6 +159,14 @@ async def update_player(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Joueur non trouvé"
+        )
+    
+    # Coach membre → modification uniquement dans sa catégorie
+    managed_cat = _get_managed_category(current_user, db)
+    if managed_cat and player.category != managed_cat:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Vous ne pouvez modifier que les joueurs de votre catégorie"
         )
     
     # Check if number change conflicts
@@ -161,6 +213,14 @@ async def delete_player(
             detail="Joueur non trouvé"
         )
     
+    # Coach membre → suppression uniquement dans sa catégorie
+    managed_cat = _get_managed_category(current_user, db)
+    if managed_cat and player.category != managed_cat:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Vous ne pouvez supprimer que les joueurs de votre catégorie"
+        )
+    
     db.delete(player)
     db.commit()
     
@@ -187,12 +247,24 @@ async def get_player_stats(
             detail="Joueur non trouvé"
         )
 
+    # Coach membre → accès uniquement aux joueurs de sa catégorie
+    managed_cat = _get_managed_category(current_user, db)
+    if managed_cat and player.category != managed_cat:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Joueur non trouvé"
+        )
+
     # Récupérer tous les matchs completed du club qui ont des player_stats
-    matches = db.query(Match).filter(
+    match_query = db.query(Match).filter(
         Match.club_id == current_user.club_id,
         Match.status == MatchStatus.COMPLETED,
         Match.player_stats != None,
-    ).order_by(Match.date.desc()).all()
+    )
+    # Coach membre → uniquement les matchs de sa catégorie
+    if managed_cat:
+        match_query = match_query.filter(Match.category == managed_cat)
+    matches = match_query.order_by(Match.date.desc()).all()
 
     # Agréger les stats
     total_matches = 0

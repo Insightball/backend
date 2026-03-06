@@ -5,6 +5,7 @@ import uuid
 
 from app.database import get_db
 from app.models import Match, MatchStatus, MatchType, User, PlanType, Club
+from app.models.club_member import ClubMember, InviteStatus
 from app.dependencies import get_current_user
 
 router = APIRouter()
@@ -57,6 +58,23 @@ def _is_club_admin(user: User) -> bool:
         user.plan in [PlanType.CLUB, PlanType.CLUB_PRO]
         and user.role in ['ADMIN', 'admin']
     )
+
+
+def _get_managed_category(user: User, db: Session) -> str | None:
+    """Coach membre → sa catégorie assignée. Admin/superadmin → None (voit tout)."""
+    if user.is_superadmin:
+        return None
+    role_val = user.role.value if hasattr(user.role, 'value') else user.role
+    if role_val == 'ADMIN':
+        return None
+    member = db.query(ClubMember).filter(
+        ClubMember.user_id == user.id,
+        ClubMember.club_id == user.club_id,
+        ClubMember.status == InviteStatus.ACCEPTED,
+    ).first()
+    if member and member.category:
+        return member.category
+    return None
 
 
 def check_and_consume_quota(user: User, db: Session) -> None:
@@ -178,9 +196,12 @@ async def list_matches(
     query = db.query(Match).filter(Match.club_id == club_id)
 
     # DS admin et superadmin voient tous les matchs du club
-    # Coaches membres voient uniquement leurs propres matchs
+    # Coaches membres voient uniquement leurs propres matchs ET de leur catégorie
     if not current_user.is_superadmin and not _is_club_admin(current_user):
         query = query.filter(Match.created_by == current_user.id)
+        managed_cat = _get_managed_category(current_user, db)
+        if managed_cat:
+            query = query.filter(Match.category == managed_cat)
 
     matches = query.order_by(Match.date.desc()).all()
     return matches
@@ -255,9 +276,12 @@ async def get_match(
         Match.id == match_id,
         Match.club_id == club_id,
     )
-    # Coach membre : accès uniquement à ses propres matchs
+    # Coach membre : accès uniquement à ses propres matchs de sa catégorie
     if not current_user.is_superadmin and not _is_club_admin(current_user):
         query = query.filter(Match.created_by == current_user.id)
+        managed_cat = _get_managed_category(current_user, db)
+        if managed_cat:
+            query = query.filter(Match.category == managed_cat)
 
     match = query.first()
     if not match:
@@ -276,9 +300,12 @@ async def delete_match(
         Match.id == match_id,
         Match.club_id == club_id,
     )
-    # Coach membre : suppression uniquement de ses propres matchs
+    # Coach membre : suppression uniquement de ses propres matchs de sa catégorie
     if not current_user.is_superadmin and not _is_club_admin(current_user):
         query = query.filter(Match.created_by == current_user.id)
+        managed_cat = _get_managed_category(current_user, db)
+        if managed_cat:
+            query = query.filter(Match.category == managed_cat)
 
     match = query.first()
     if not match:
