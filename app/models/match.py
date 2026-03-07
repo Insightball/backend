@@ -14,6 +14,7 @@ class MatchType(str, enum.Enum):
     CHAMPIONNAT = "championnat"
     COUPE = "coupe"
     AMICAL = "amical"
+    PREPARATION = "preparation"
 
 class Match(Base):
     __tablename__ = "matches"

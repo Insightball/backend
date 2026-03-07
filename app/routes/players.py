@@ -6,7 +6,7 @@ import uuid
 from app.database import get_db
 from app.models import User
 from app.models import Player
-from app.models import Match, MatchStatus
+from app.models import Match, MatchStatus, MatchType
 from app.models.club_member import ClubMember, InviteStatus
 from app.schemas.player import PlayerCreate, PlayerResponse, PlayerUpdate
 from app.dependencies import get_current_active_user
@@ -233,7 +233,7 @@ async def get_player_stats(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    """Aggregate player stats from all completed matches"""
+    """Aggregate player stats from all completed matches, separated by type."""
 
     # Vérifier que le joueur appartient au club
     player = db.query(Player).filter(
@@ -261,110 +261,113 @@ async def get_player_stats(
         Match.status == MatchStatus.COMPLETED,
         Match.player_stats != None,
     )
-    # Coach membre → uniquement les matchs de sa catégorie
     if managed_cat:
         match_query = match_query.filter(Match.category == managed_cat)
     matches = match_query.order_by(Match.date.desc()).all()
 
-    # Agréger les stats
-    total_matches = 0
-    total_starter = 0
-    total_sub = 0
-    total_minutes = 0
-    total_goals = 0
-    total_assists = 0
-    total_passes = 0
-    total_pass_success_sum = 0
-    total_pass_success_count = 0
-    total_shots = 0
-    total_shots_on_target = 0
-    total_duels = 0
-    total_duels_won = 0
-    total_distance = 0.0
-    total_key_passes = 0
-    total_tackles = 0
-    total_interceptions = 0
-    total_saves = 0
-    total_yellow_cards = 0
-    match_history = []
+    # Séparer les matchs par type
+    OFFICIAL_TYPES = {MatchType.CHAMPIONNAT, MatchType.COUPE}
 
-    for match in matches:
-        ps_list = match.player_stats
-        if not isinstance(ps_list, list):
-            continue
+    def _aggregate(match_list):
+        """Agrège les stats du joueur depuis une liste de matchs."""
+        agg = dict(
+            matches_played=0, matches_starter=0, matches_sub=0,
+            total_minutes=0, goals=0, assists=0, total_passes=0,
+            pass_success_sum=0, pass_success_count=0,
+            total_shots=0, shots_on_target=0,
+            total_duels=0, duels_won=0, total_distance=0.0,
+            total_key_passes=0, total_tackles=0, total_interceptions=0,
+            total_saves=0, yellow_cards=0,
+        )
+        history = []
 
-        for ps in ps_list:
-            if ps.get("player_id") != player_id:
+        for match in match_list:
+            ps_list = match.player_stats
+            if not isinstance(ps_list, list):
                 continue
+            for ps in ps_list:
+                if ps.get("player_id") != player_id:
+                    continue
 
-            # Ce joueur a participé à ce match
-            total_matches += 1
-            is_starter = ps.get("starter", False)
-            if is_starter:
-                total_starter += 1
-            else:
-                total_sub += 1
+                agg["matches_played"] += 1
+                is_starter = ps.get("starter", False)
+                if is_starter:
+                    agg["matches_starter"] += 1
+                else:
+                    agg["matches_sub"] += 1
 
-            minutes = ps.get("minutes", 0)
-            total_minutes += minutes
-            total_goals += ps.get("goals", 0)
-            total_assists += ps.get("assists", 0)
-            total_passes += ps.get("passes", 0)
-            if ps.get("pass_success") is not None:
-                total_pass_success_sum += ps["pass_success"]
-                total_pass_success_count += 1
-            total_shots += ps.get("shots", 0)
-            total_shots_on_target += ps.get("shots_on_target", 0)
-            total_duels += ps.get("duels", 0)
-            total_duels_won += ps.get("duels_won", 0)
-            total_distance += ps.get("distance_km", 0.0)
-            total_key_passes += ps.get("key_passes", 0)
-            total_tackles += ps.get("tackles", 0)
-            total_interceptions += ps.get("interceptions", 0)
-            total_saves += ps.get("saves", 0)
-            if ps.get("yellow_card"):
-                total_yellow_cards += 1
+                minutes = ps.get("minutes", 0)
+                agg["total_minutes"] += minutes
+                agg["goals"] += ps.get("goals", 0)
+                agg["assists"] += ps.get("assists", 0)
+                agg["total_passes"] += ps.get("passes", 0)
+                if ps.get("pass_success") is not None:
+                    agg["pass_success_sum"] += ps["pass_success"]
+                    agg["pass_success_count"] += 1
+                agg["total_shots"] += ps.get("shots", 0)
+                agg["shots_on_target"] += ps.get("shots_on_target", 0)
+                agg["total_duels"] += ps.get("duels", 0)
+                agg["duels_won"] += ps.get("duels_won", 0)
+                agg["total_distance"] += ps.get("distance_km", 0.0)
+                agg["total_key_passes"] += ps.get("key_passes", 0)
+                agg["total_tackles"] += ps.get("tackles", 0)
+                agg["total_interceptions"] += ps.get("interceptions", 0)
+                agg["total_saves"] += ps.get("saves", 0)
+                if ps.get("yellow_card"):
+                    agg["yellow_cards"] += 1
 
-            # Historique match
-            match_history.append({
-                "match_id": match.id,
-                "opponent": match.opponent,
-                "date": match.date.isoformat() if match.date else None,
-                "score_home": match.score_home,
-                "score_away": match.score_away,
-                "is_home": match.is_home,
-                "competition": match.competition,
-                "starter": is_starter,
-                "minutes": minutes,
-                "goals": ps.get("goals", 0),
-                "assists": ps.get("assists", 0),
-                "rating": ps.get("rating"),
-            })
-            break  # Un joueur ne peut apparaître qu'une fois par match
+                match_type_val = match.type.value if hasattr(match.type, 'value') else (match.type or 'championnat')
+                history.append({
+                    "match_id": match.id,
+                    "opponent": match.opponent,
+                    "date": match.date.isoformat() if match.date else None,
+                    "score_home": match.score_home,
+                    "score_away": match.score_away,
+                    "is_home": match.is_home,
+                    "competition": match.competition,
+                    "type": match_type_val,
+                    "starter": is_starter,
+                    "minutes": minutes,
+                    "goals": ps.get("goals", 0),
+                    "assists": ps.get("assists", 0),
+                    "rating": ps.get("rating"),
+                })
+                break
 
-    avg_pass_success = round(total_pass_success_sum / total_pass_success_count, 1) if total_pass_success_count > 0 else None
-    avg_distance = round(total_distance / total_matches, 1) if total_matches > 0 else None
+        avg_pass = round(agg["pass_success_sum"] / agg["pass_success_count"], 1) if agg["pass_success_count"] > 0 else None
+        avg_dist = round(agg["total_distance"] / agg["matches_played"], 1) if agg["matches_played"] > 0 else None
+
+        return {
+            "matches_played": agg["matches_played"],
+            "matches_starter": agg["matches_starter"],
+            "matches_sub": agg["matches_sub"],
+            "total_minutes": agg["total_minutes"],
+            "goals": agg["goals"],
+            "assists": agg["assists"],
+            "total_passes": agg["total_passes"],
+            "avg_pass_success": avg_pass,
+            "total_shots": agg["total_shots"],
+            "shots_on_target": agg["shots_on_target"],
+            "total_duels": agg["total_duels"],
+            "duels_won": agg["duels_won"],
+            "total_distance_km": round(agg["total_distance"], 1),
+            "avg_distance_km": avg_dist,
+            "total_key_passes": agg["total_key_passes"],
+            "total_tackles": agg["total_tackles"],
+            "total_interceptions": agg["total_interceptions"],
+            "total_saves": agg["total_saves"],
+            "yellow_cards": agg["yellow_cards"],
+            "match_history": history,
+        }
+
+    official_matches = [m for m in matches if m.type in OFFICIAL_TYPES]
+    friendly_matches = [m for m in matches if m.type == MatchType.AMICAL]
+    prepa_matches = [m for m in matches if m.type == MatchType.PREPARATION]
 
     return {
         "player_id": player_id,
-        "matches_played": total_matches,
-        "matches_starter": total_starter,
-        "matches_sub": total_sub,
-        "total_minutes": total_minutes,
-        "goals": total_goals,
-        "assists": total_assists,
-        "total_passes": total_passes,
-        "avg_pass_success": avg_pass_success,
-        "total_shots": total_shots,
-        "shots_on_target": total_shots_on_target,
-        "total_duels": total_duels,
-        "duels_won": total_duels_won,
-        "total_distance_km": round(total_distance, 1),
-        "avg_distance_km": avg_distance,
-        "total_key_passes": total_key_passes,
-        "total_tackles": total_tackles,
-        "total_interceptions": total_interceptions,
-        "total_saves": total_saves,
-        "yellow_cards": total_yellow_cards,
-        "match_history": match_history,
+        "official": _aggregate(official_matches),
+        "friendly": _aggregate(friendly_matches),
+        "preparation": _aggregate(prepa_matches),
+        "all": _aggregate(matches),
     }
