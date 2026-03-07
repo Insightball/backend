@@ -289,6 +289,50 @@ async def get_match(
     return match
 
 
+@router.patch("/{match_id}")
+async def update_match(
+    match_id: str,
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Update match metadata (type, category, opponent, etc.). Works on any status."""
+    club_id = _get_solo_club_id(current_user, db)
+    query = db.query(Match).filter(
+        Match.id == match_id,
+        Match.club_id == club_id,
+    )
+    if not current_user.is_superadmin and not _is_club_admin(current_user):
+        query = query.filter(Match.created_by == current_user.id)
+        managed_cat = _get_managed_category(current_user, db)
+        if managed_cat:
+            query = query.filter(Match.category == managed_cat)
+
+    match = query.first()
+    if not match:
+        raise HTTPException(status_code=404, detail="Match introuvable")
+
+    # Champs modifiables
+    ALLOWED_FIELDS = {'type', 'category', 'opponent', 'date', 'competition', 'location',
+                      'is_home', 'formation', 'opponent_formation', 'score_home', 'score_away',
+                      'weather', 'pitch_type'}
+    for field, value in payload.items():
+        if field not in ALLOWED_FIELDS:
+            continue
+        if field == 'type':
+            try:
+                value = MatchType(value.upper() if isinstance(value, str) else value)
+            except (ValueError, AttributeError):
+                raise HTTPException(status_code=400, detail=f"Type de match invalide: {value}")
+        if field == 'date' and isinstance(value, str):
+            value = datetime.fromisoformat(value)
+        setattr(match, field, value)
+
+    db.commit()
+    db.refresh(match)
+    return {"message": "Match mis à jour", "id": match.id}
+
+
 @router.delete("/{match_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_match(
     match_id: str,
