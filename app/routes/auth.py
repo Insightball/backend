@@ -19,16 +19,11 @@ from app.schemas import UserSignup, UserLogin, Token, UserResponse
 from app.utils.auth import verify_password, get_password_hash, create_access_token
 from app.dependencies import get_current_user
 from app.config import settings
+from app.constants import PLAN_QUOTAS
 
 router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)
 resend.api_key = os.getenv("RESEND_API_KEY")
-
-# Source de vérité pour les quotas — aligné avec matches.py
-PLAN_QUOTAS = {
-    PlanType.COACH: 4,
-    PlanType.CLUB: 10,
-}
 
 
 def _verify_recaptcha(token: str) -> bool:
@@ -156,7 +151,7 @@ async def signup(request: Request, user_data: UserSignup, db: Session = Depends(
     if user_data.plan == PlanType.CLUB:
         if not user_data.club_name:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Club name is required for CLUB plan")
-        club = Club(id=str(uuid.uuid4()), name=user_data.club_name, quota_matches=PLAN_QUOTAS[PlanType.CLUB])
+        club = Club(id=str(uuid.uuid4()), name=user_data.club_name, quota_matches=PLAN_QUOTAS["CLUB"])
         db.add(club)
         db.flush()
     else:
@@ -165,7 +160,7 @@ async def signup(request: Request, user_data: UserSignup, db: Session = Depends(
         club = Club(
             id=user_id,  # convention : solo club id == user id
             name=f"Coach — {user_data.name}",
-            quota_matches=PLAN_QUOTAS[PlanType.COACH],
+            quota_matches=PLAN_QUOTAS["COACH"],
         )
         db.add(club)
         db.flush()

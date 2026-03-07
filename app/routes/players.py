@@ -10,30 +10,12 @@ from app.models import Match, MatchStatus, MatchType
 from app.models.club_member import ClubMember, InviteStatus
 from app.schemas.player import PlayerCreate, PlayerResponse, PlayerUpdate
 from app.dependencies import get_current_active_user
+from app.utils.club import get_managed_category
 
 router = APIRouter()
 
-
-def _get_managed_category(user: User, db: Session) -> str | None:
-    """
-    Retourne la catégorie assignée au coach membre via ClubMember.
-    DS admin / superadmin → None (voit tout).
-    Coach membre → sa catégorie (ex: 'U19', 'Seniors').
-    """
-    if user.is_superadmin:
-        return None
-    role_val = user.role.value if hasattr(user.role, 'value') else user.role
-    if role_val == 'ADMIN':
-        return None
-    # Coach membre → chercher sa catégorie dans club_members
-    member = db.query(ClubMember).filter(
-        ClubMember.user_id == user.id,
-        ClubMember.club_id == user.club_id,
-        ClubMember.status == InviteStatus.ACCEPTED,
-    ).first()
-    if member and member.category:
-        return member.category
-    return None
+# _get_managed_category → importé depuis app.utils.club
+_get_managed_category = get_managed_category
 
 @router.post("/", response_model=PlayerResponse, status_code=status.HTTP_201_CREATED)
 async def create_player(

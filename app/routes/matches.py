@@ -7,22 +7,17 @@ from app.database import get_db
 from app.models import Match, MatchStatus, MatchType, User, PlanType, Club
 from app.models.club_member import ClubMember, InviteStatus
 from app.dependencies import get_current_user
+from app.constants import PLAN_QUOTAS, TRIAL_MATCH_LIMIT
+from app.utils.club import get_managed_category
 
 router = APIRouter()
-
-PLAN_QUOTAS = {
-    PlanType.COACH:    4,
-    PlanType.CLUB:     10,
-    PlanType.CLUB_PRO: 15,
-}
-
-TRIAL_MATCH_LIMIT = 1
 
 
 def get_user_quota(user: User) -> int:
     if user.quota_override is not None and user.quota_override > 0:
         return user.quota_override
-    return PLAN_QUOTAS.get(user.plan, PLAN_QUOTAS[PlanType.COACH])
+    plan_key = user.plan.value if hasattr(user.plan, "value") else str(user.plan)
+    return PLAN_QUOTAS.get(plan_key, PLAN_QUOTAS["COACH"])
 
 
 def get_billing_user(user: User, db: Session) -> User:
@@ -60,21 +55,8 @@ def _is_club_admin(user: User) -> bool:
     )
 
 
-def _get_managed_category(user: User, db: Session) -> str | None:
-    """Coach membre → sa catégorie assignée. Admin/superadmin → None (voit tout)."""
-    if user.is_superadmin:
-        return None
-    role_val = user.role.value if hasattr(user.role, 'value') else user.role
-    if role_val == 'ADMIN':
-        return None
-    member = db.query(ClubMember).filter(
-        ClubMember.user_id == user.id,
-        ClubMember.club_id == user.club_id,
-        ClubMember.status == InviteStatus.ACCEPTED,
-    ).first()
-    if member and member.category:
-        return member.category
-    return None
+# _get_managed_category → importé depuis app.utils.club
+_get_managed_category = get_managed_category
 
 
 def check_and_consume_quota(user: User, db: Session) -> None:
