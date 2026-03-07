@@ -11,7 +11,7 @@ import logging
 import os
 
 from app.database import engine, Base
-from app.routes import auth, matches, players, clubs, subscription, upload, leads, admin, club_members, account, notifications
+from app.routes import auth, matches, players, clubs, subscription, upload, leads, admin, club_members, account, notifications, game_plans
 from app.models import User, Club, Match
 from app.models.club_member import ClubMember
 
@@ -89,6 +89,7 @@ app.include_router(upload.router,        prefix="/api/upload",        tags=["upl
 app.include_router(leads.router,         prefix="/api/leads",         tags=["leads"])
 app.include_router(notifications.router, prefix="/api/notifications", tags=["notifications"])
 app.include_router(admin.router,         prefix="/api/x-admin",       tags=["admin"])
+app.include_router(game_plans.router,    prefix="/api/game-plan",     tags=["game-plan"])
 
 
 @app.get("/", include_in_schema=False)
