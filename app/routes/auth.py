@@ -14,6 +14,7 @@ import json as _json
 
 from app.database import get_db
 from app.models import User, Club, PlanType
+from app.models.club_member import ClubMember, InviteStatus
 from app.schemas import UserSignup, UserLogin, Token, UserResponse
 from app.utils.auth import verify_password, get_password_hash, create_access_token
 from app.dependencies import get_current_user
@@ -209,7 +210,20 @@ async def login(request: Request, credentials: UserLogin, db: Session = Depends(
 
 
 @router.get("/me", response_model=UserResponse)
-async def get_current_user_info(current_user: User = Depends(get_current_user)):
+async def get_current_user_info(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # Récupérer la catégorie assignée pour les coachs membres
+    managed_category = None
+    if current_user.club_id:
+        role_val = current_user.role.value if hasattr(current_user.role, 'value') else current_user.role
+        if role_val != 'ADMIN' and not current_user.is_superadmin:
+            member = db.query(ClubMember).filter(
+                ClubMember.user_id == current_user.id,
+                ClubMember.club_id == current_user.club_id,
+                ClubMember.status == InviteStatus.ACCEPTED,
+            ).first()
+            if member:
+                managed_category = member.category
+
     return UserResponse(
         id=current_user.id,
         email=current_user.email,
@@ -219,6 +233,7 @@ async def get_current_user_info(current_user: User = Depends(get_current_user)):
         club_name=current_user.club.name if current_user.club else None,
         club_id=current_user.club_id,
         club_logo=current_user.club.logo_url if current_user.club else None,
+        managed_category=managed_category,
         profile_role=current_user.profile_role,
         profile_level=current_user.profile_level,
         profile_phone=current_user.profile_phone,

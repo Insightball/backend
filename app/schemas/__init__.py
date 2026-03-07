@@ -31,6 +31,7 @@ class UserResponse(BaseModel):
     club_name: Optional[str] = None
     club_id: Optional[str] = None
     club_logo: Optional[str] = None
+    managed_category: Optional[str] = None
     trial_ends_at: Optional[str] = None
     trial_match_used: Optional[bool] = None
     # Champs profil onboarding
