@@ -138,20 +138,23 @@ def check_and_consume_quota(user: User, db: Session) -> None:
 
 
 def _get_solo_club_id(user: User, db: Session) -> str:
+    """
+    Retourne le club_id du user.
+    Le solo club est créé au signup (auth.py) — cette fonction est lecture seule.
+    Si club_id absent (edge case legacy), lève une erreur claire plutôt que d'écrire en GET.
+    """
     if user.club_id:
         return user.club_id
+    # Fallback legacy — chercher le solo club existant sans en créer un nouveau
     solo_club = db.query(Club).filter(Club.id == user.id).first()
-    if not solo_club:
-        solo_club = Club(
-            id=user.id,
-            name=f"Coach — {user.name}",
-            quota_matches=PLAN_QUOTAS[PlanType.COACH],
-        )
-        db.add(solo_club)
-        db.flush()
-    user.club_id = solo_club.id
-    db.flush()
-    return solo_club.id
+    if solo_club:
+        user.club_id = solo_club.id
+        db.commit()
+        return solo_club.id
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Club non trouvé. Contactez le support."
+    )
 
 
 @router.post("/", status_code=status.HTTP_201_CREATED)

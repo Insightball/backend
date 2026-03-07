@@ -52,26 +52,6 @@ def _plan_to_price(plan: str) -> str:
     if p == "CLUB_PRO": return STRIPE_PRICE_CLUB_139
     raise HTTPException(status_code=400, detail="Invalid plan")
 
-def _resend_post(resend_key: str, payload: dict) -> int:
-    """POST vers Resend API via urllib stdlib. Retourne le status HTTP."""
-    import urllib.request
-    import urllib.error
-    import json as _json
-    data = _json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        "https://api.resend.com/emails",
-        data=data,
-        headers={"Authorization": f"Bearer {resend_key}", "Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=10) as r:
-            return r.status
-    except urllib.error.HTTPError as e:
-        body = e.read().decode("utf-8", errors="replace")
-        print(f"[ERR] Resend HTTP {e.code}: {body}")
-        return e.code
-
 
 def _plan_value(user):
     return user.plan.value if hasattr(user.plan, 'value') else user.plan
@@ -886,8 +866,7 @@ async def request_club_quote(
     Envoie une demande de devis CLUB par email via Resend.
     Pas de création de subscription Stripe — traitement manuel par l'équipe Insightball.
     """
-    resend_key = os.getenv("RESEND_API_KEY")
-    if not resend_key:
+    if not resend.api_key:
         raise HTTPException(status_code=500, detail="Service email non configuré")
 
     plan_value = _plan_value(current_user)
@@ -895,10 +874,11 @@ async def request_club_quote(
     profile_club  = getattr(current_user, 'profile_city', '') or ''
 
     try:
-        status = _resend_post(resend_key, {
-            "from":    "Insightball <contact@insightball.com>",
-            "to":      ["contact@insightball.com"],
-            "subject": f"Demande de devis CLUB — {current_user.name}",
+        resend.Emails.send({
+            "from":     "Insightball <contact@insightball.com>",
+            "to":       ["contact@insightball.com"],
+            "reply_to": current_user.email,
+            "subject":  f"Demande de devis CLUB — {current_user.name}",
             "html": f"""
             <div style="font-family:monospace;max-width:520px;margin:0 auto;padding:32px 24px;background:#faf8f4;">
               <div style="font-size:22px;font-weight:900;text-transform:uppercase;letter-spacing:.04em;margin-bottom:24px;">
@@ -916,18 +896,13 @@ async def request_club_quote(
               <p style="margin-top:20px;font-size:11px;color:#aaa;">Répondre à : {current_user.email}</p>
             </div>
             """,
-            "reply_to": current_user.email,
         })
-        if status not in (200, 201):
-            print(f"[WARN] Resend club quote failed {status}")
-            raise HTTPException(status_code=500, detail="Erreur envoi email")
-
+        print(f"[INFO] Club quote email envoyé pour {current_user.email}")
         return {"success": True, "message": "Votre demande de devis a été envoyée. Nous vous contacterons sous 24h."}
 
-    except HTTPException:
-        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erreur : {e}")
+        print(f"[ERR] Club quote email failed: {e}")
+        raise HTTPException(status_code=500, detail="Erreur lors de l'envoi de la demande")
 
 
 # ─────────────────────────────────────────────

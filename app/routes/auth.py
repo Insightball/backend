@@ -151,21 +151,32 @@ async def signup(request: Request, user_data: UserSignup, db: Session = Depends(
         )
 
     club = None
+    user_id = str(uuid.uuid4())
+
     if user_data.plan == PlanType.CLUB:
         if not user_data.club_name:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Club name is required for CLUB plan")
-        # ── FIX : quota_matches aligné avec PLAN_QUOTAS (était hardcodé à 10) ──
         club = Club(id=str(uuid.uuid4()), name=user_data.club_name, quota_matches=PLAN_QUOTAS[PlanType.CLUB])
+        db.add(club)
+        db.flush()
+    else:
+        # Plan COACH — créer le solo club dès le signup
+        # Évite que _get_solo_club_id crée un club en GET plus tard
+        club = Club(
+            id=user_id,  # convention : solo club id == user id
+            name=f"Coach — {user_data.name}",
+            quota_matches=PLAN_QUOTAS[PlanType.COACH],
+        )
         db.add(club)
         db.flush()
 
     user = User(
-        id=str(uuid.uuid4()),
+        id=user_id,
         email=user_data.email,
         hashed_password=get_password_hash(user_data.password),
         name=user_data.name,
         plan=user_data.plan,
-        club_id=club.id if club else None
+        club_id=club.id,
     )
     db.add(user)
     db.commit()
