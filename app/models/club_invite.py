@@ -41,7 +41,7 @@ class ClubInvite(Base):
     status = Column(Enum(ClubInviteStatus), default=ClubInviteStatus.PENDING, nullable=False)
 
     # Si le DS a déjà un compte Coach → upgrade
-    existing_user_id = Column(String, nullable=True)
+    existing_user_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)

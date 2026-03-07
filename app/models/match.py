@@ -21,7 +21,7 @@ class Match(Base):
     
     id = Column(String, primary_key=True, index=True)
     club_id = Column(String, ForeignKey("clubs.id"), nullable=False)
-    created_by = Column(String, ForeignKey("users.id"), nullable=True, index=True)  # coach qui a uploadé le match
+    created_by = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)  # coach qui a uploadé le match
     
     # Match info
     opponent = Column(String, nullable=False)

@@ -31,7 +31,7 @@ class ClubMember(Base):
     status       = Column(Enum(InviteStatus), default=InviteStatus.PENDING)
     invite_token = Column(String, unique=True, nullable=True)
 
-    invited_by  = Column(String, ForeignKey("users.id"), nullable=False)
+    invited_by  = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     invited_at  = Column(DateTime, default=datetime.utcnow)
     accepted_at = Column(DateTime, nullable=True)
 

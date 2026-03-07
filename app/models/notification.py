@@ -14,7 +14,7 @@ class Notification(Base):
     __tablename__ = "notifications"
     
     id = Column(String, primary_key=True, index=True)
-    user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     
     type = Column(Enum(NotificationType), nullable=False)
     title = Column(String, nullable=False)

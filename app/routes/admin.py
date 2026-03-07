@@ -8,7 +8,7 @@ import uuid
 import secrets
 
 from app.database import get_db
-from app.models import User, Club
+from app.models import User, Club, Match, Notification, GamePlan
 from app.models.club_member import ClubMember
 from app.models.club_invite import ClubInvite, ClubInviteStatus
 from app.utils.auth import get_password_hash
@@ -195,8 +195,62 @@ def admin_delete_user(user_id: str, db: Session = Depends(get_db), current_admin
         raise HTTPException(status_code=404, detail="Utilisateur introuvable")
     if user.id == current_admin.id:
         raise HTTPException(status_code=400, detail="Impossible de supprimer son propre compte")
+    # Nettoyer les données liées sans cascade SQL
+    db.query(Notification).filter(Notification.user_id == user_id).delete()
     db.query(ClubMember).filter((ClubMember.user_id == user_id) | (ClubMember.invited_by == user_id)).delete()
     db.delete(user); db.commit()
+
+
+@router.get("/users/{user_id}/activity")
+def admin_user_activity(user_id: str, db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
+    """Vue détaillée de l'activité d'un user : matchs, joueurs, projet de jeu."""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+
+    # Matchs créés par ce user
+    matches = db.query(Match).filter(Match.created_by == user_id).order_by(desc(Match.date)).all()
+
+    # Game plan
+    game_plan = db.query(GamePlan).filter(GamePlan.user_id == user_id).first()
+
+    # Joueurs (via club si club member)
+    player_count = 0
+    if user.club_id:
+        from app.models import Player
+        player_count = db.query(func.count(Player.id)).filter(Player.club_id == user.club_id).scalar()
+
+    # Notifications non lues
+    notif_unread = db.query(func.count(Notification.id)).filter(
+        Notification.user_id == user_id, Notification.read == False
+    ).scalar()
+
+    return {
+        "user_id": user_id,
+        "name": user.name,
+        "email": user.email,
+        "plan": user.plan.value if hasattr(user.plan, 'value') else user.plan,
+        "last_login": user.last_login,
+        "created_at": user.created_at,
+        "matches": {
+            "total": len(matches),
+            "completed": len([m for m in matches if m.status.value == "completed"]),
+            "pending": len([m for m in matches if m.status.value == "pending"]),
+            "recent": [
+                {"id": m.id, "opponent": m.opponent, "date": str(m.date), "status": m.status.value, "type": m.type.value if m.type else None}
+                for m in matches[:10]
+            ],
+        },
+        "game_plan": {
+            "exists": game_plan is not None,
+            "formation": game_plan.formation if game_plan else None,
+            "category": game_plan.category if game_plan else None,
+            "themes_count": len(game_plan.programming or {}) if game_plan else 0,
+            "updated_at": str(game_plan.updated_at) if game_plan else None,
+        },
+        "players_in_club": player_count,
+        "notifications_unread": notif_unread,
+    }
 
 
 @router.get("/payments")
