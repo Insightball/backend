@@ -16,12 +16,19 @@ class MatchType(str, enum.Enum):
     AMICAL = "amical"
     PREPARATION = "preparation"
 
+def compute_season(date: datetime) -> str:
+    """Calcule la saison FFF depuis une date. Ex: mars 2026 → '2025-26', sept 2025 → '2025-26'"""
+    if date.month >= 7:
+        return f"{date.year}-{str(date.year + 1)[-2:]}"
+    else:
+        return f"{date.year - 1}-{str(date.year)[-2:]}"
+
 class Match(Base):
     __tablename__ = "matches"
     
     id = Column(String, primary_key=True, index=True)
     club_id = Column(String, ForeignKey("clubs.id"), nullable=False)
-    created_by = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)  # coach qui a uploadé le match
+    created_by = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     
     # Match info
     opponent = Column(String, nullable=False)
@@ -30,6 +37,10 @@ class Match(Base):
     type = Column(Enum(MatchType), default=MatchType.CHAMPIONNAT)
     competition = Column(String, nullable=True)
     location = Column(String, nullable=True)
+
+    # Saison FFF — calculée automatiquement depuis la date du match
+    # Format : "2025-26", "2024-25", etc.
+    season = Column(String, nullable=True, index=True)
     
     # Score
     score_home = Column(Integer, nullable=True)

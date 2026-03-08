@@ -5,6 +5,7 @@ import uuid
 
 from app.database import get_db
 from app.models import Match, MatchStatus, MatchType, User, PlanType, Club
+from app.models.match import compute_season
 from app.models.club_member import ClubMember, InviteStatus
 from app.dependencies import get_current_user
 from app.constants import PLAN_QUOTAS, TRIAL_MATCH_LIMIT
@@ -120,14 +121,8 @@ def check_and_consume_quota(user: User, db: Session) -> None:
 
 
 def _get_solo_club_id(user: User, db: Session) -> str:
-    """
-    Retourne le club_id du user.
-    Le solo club est créé au signup (auth.py) — cette fonction est lecture seule.
-    Si club_id absent (edge case legacy), lève une erreur claire plutôt que d'écrire en GET.
-    """
     if user.club_id:
         return user.club_id
-    # Fallback legacy — chercher le solo club existant sans en créer un nouveau
     solo_club = db.query(Club).filter(Club.id == user.id).first()
     if solo_club:
         user.club_id = solo_club.id
@@ -147,18 +142,23 @@ async def create_match(
 ):
     check_and_consume_quota(current_user, db)
     club_id = _get_solo_club_id(current_user, db)
+
+    match_date = datetime.fromisoformat(payload["date"]) if payload.get("date") else datetime.utcnow()
+    season = compute_season(match_date)
+
     match = Match(
         id=str(uuid.uuid4()),
         club_id=club_id,
         created_by=current_user.id,
         opponent=payload.get("opponent"),
-        date=datetime.fromisoformat(payload["date"]) if payload.get("date") else datetime.utcnow(),
+        date=match_date,
         category=payload.get("category", "N3"),
         type=payload.get("type", MatchType.CHAMPIONNAT),
         competition=payload.get("competition"),
         location=payload.get("location"),
         is_home=payload.get("is_home", True),
         formation=payload.get("formation"),
+        season=season,
         status=MatchStatus.PENDING,
     )
     db.add(match)
@@ -168,6 +168,7 @@ async def create_match(
         "id": match.id,
         "status": match.status,
         "club_id": match.club_id,
+        "season": match.season,
         "created_at": match.created_at.isoformat() + "Z",
     }
 
@@ -176,6 +177,7 @@ async def create_match(
 async def list_matches(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    season: str = None,
 ):
     club_id = _get_solo_club_id(current_user, db)
     query = db.query(Match).filter(Match.club_id == club_id)
@@ -188,8 +190,32 @@ async def list_matches(
         if managed_cat:
             query = query.filter(Match.category == managed_cat)
 
+    # Filtre saison — si non précisé, saison courante par défaut
+    current_season = compute_season(datetime.utcnow())
+    active_season = season if season else current_season
+    query = query.filter(Match.season == active_season)
+
     matches = query.order_by(Match.date.desc()).all()
     return matches
+
+
+@router.get("/seasons")
+async def list_seasons(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Retourne la liste des saisons disponibles pour ce club."""
+    club_id = _get_solo_club_id(current_user, db)
+    rows = db.query(Match.season).filter(
+        Match.club_id == club_id,
+        Match.season != None,
+    ).distinct().order_by(Match.season.desc()).all()
+    seasons = [r[0] for r in rows if r[0]]
+    # Toujours inclure la saison courante même si vide
+    current_season = compute_season(datetime.utcnow())
+    if current_season not in seasons:
+        seasons.insert(0, current_season)
+    return {"seasons": seasons, "current": current_season}
 
 
 @router.get("/quota")
@@ -261,7 +287,6 @@ async def get_match(
         Match.id == match_id,
         Match.club_id == club_id,
     )
-    # Coach membre : accès uniquement à ses propres matchs de sa catégorie
     if not current_user.is_superadmin and not _is_club_admin(current_user):
         query = query.filter(Match.created_by == current_user.id)
         managed_cat = _get_managed_category(current_user, db)
@@ -297,7 +322,6 @@ async def update_match(
     if not match:
         raise HTTPException(status_code=404, detail="Match introuvable")
 
-    # Champs modifiables
     ALLOWED_FIELDS = {'type', 'category', 'opponent', 'date', 'competition', 'location',
                       'is_home', 'formation', 'opponent_formation', 'score_home', 'score_away',
                       'weather', 'pitch_type'}
@@ -311,11 +335,13 @@ async def update_match(
                 raise HTTPException(status_code=400, detail=f"Type de match invalide: {value}")
         if field == 'date' and isinstance(value, str):
             value = datetime.fromisoformat(value)
+            # Recalculer la saison si la date change
+            match.season = compute_season(value)
         setattr(match, field, value)
 
     db.commit()
     db.refresh(match)
-    return {"message": "Match mis à jour", "id": match.id}
+    return {"message": "Match mis à jour", "id": match.id, "season": match.season}
 
 
 @router.delete("/{match_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -329,7 +355,6 @@ async def delete_match(
         Match.id == match_id,
         Match.club_id == club_id,
     )
-    # Coach membre : suppression uniquement de ses propres matchs de sa catégorie
     if not current_user.is_superadmin and not _is_club_admin(current_user):
         query = query.filter(Match.created_by == current_user.id)
         managed_cat = _get_managed_category(current_user, db)
