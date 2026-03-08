@@ -50,13 +50,14 @@ def get_billing_period(user: User):
 
 
 def _is_club_admin(user: User) -> bool:
+    role_val = user.role.value if hasattr(user.role, 'value') else str(user.role)
     return (
         user.plan in [PlanType.CLUB, PlanType.CLUB_PRO]
-        and user.role in ['ADMIN', 'admin']
+        and role_val.upper() == 'ADMIN'
     )
 
 
-# _get_managed_category → importé depuis app.utils.club
+# _get_managed_category -> importé depuis app.utils.club
 _get_managed_category = get_managed_category
 
 
@@ -183,14 +184,15 @@ async def list_matches(
     query = db.query(Match).filter(Match.club_id == club_id)
 
     # DS admin et superadmin voient tous les matchs du club
-    # Coaches membres voient uniquement leurs propres matchs ET de leur catégorie
+    # Coaches membres voient uniquement les matchs de leur catégorie
     if not current_user.is_superadmin and not _is_club_admin(current_user):
-        query = query.filter(Match.created_by == current_user.id)
         managed_cat = _get_managed_category(current_user, db)
         if managed_cat:
             query = query.filter(Match.category == managed_cat)
+        else:
+            query = query.filter(Match.created_by == current_user.id)
 
-    # Filtre saison — si non précisé, saison courante par défaut
+    # Filtre saison - si non précisé, saison courante par défaut
     current_season = compute_season(datetime.utcnow())
     active_season = season if season else current_season
     query = query.filter(Match.season == active_season)
@@ -211,7 +213,6 @@ async def list_seasons(
         Match.season != None,
     ).distinct().order_by(Match.season.desc()).all()
     seasons = [r[0] for r in rows if r[0]]
-    # Toujours inclure la saison courante même si vide
     current_season = compute_season(datetime.utcnow())
     if current_season not in seasons:
         seasons.insert(0, current_season)
@@ -288,10 +289,11 @@ async def get_match(
         Match.club_id == club_id,
     )
     if not current_user.is_superadmin and not _is_club_admin(current_user):
-        query = query.filter(Match.created_by == current_user.id)
         managed_cat = _get_managed_category(current_user, db)
         if managed_cat:
             query = query.filter(Match.category == managed_cat)
+        else:
+            query = query.filter(Match.created_by == current_user.id)
 
     match = query.first()
     if not match:
@@ -313,10 +315,11 @@ async def update_match(
         Match.club_id == club_id,
     )
     if not current_user.is_superadmin and not _is_club_admin(current_user):
-        query = query.filter(Match.created_by == current_user.id)
         managed_cat = _get_managed_category(current_user, db)
         if managed_cat:
             query = query.filter(Match.category == managed_cat)
+        else:
+            query = query.filter(Match.created_by == current_user.id)
 
     match = query.first()
     if not match:
@@ -335,7 +338,6 @@ async def update_match(
                 raise HTTPException(status_code=400, detail=f"Type de match invalide: {value}")
         if field == 'date' and isinstance(value, str):
             value = datetime.fromisoformat(value)
-            # Recalculer la saison si la date change
             match.season = compute_season(value)
         setattr(match, field, value)
 
@@ -356,10 +358,11 @@ async def delete_match(
         Match.club_id == club_id,
     )
     if not current_user.is_superadmin and not _is_club_admin(current_user):
-        query = query.filter(Match.created_by == current_user.id)
         managed_cat = _get_managed_category(current_user, db)
         if managed_cat:
             query = query.filter(Match.category == managed_cat)
+        else:
+            query = query.filter(Match.created_by == current_user.id)
 
     match = query.first()
     if not match:
