@@ -313,6 +313,15 @@ async def get_player_stats(
                     "goals": ps.get("goals", 0),
                     "assists": ps.get("assists", 0),
                     "rating": ps.get("rating"),
+                    # Métriques par match pour courbes de progression
+                    "pass_success": ps.get("pass_success"),
+                    "duels_won_pct": round(ps.get("duels_won", 0) / ps.get("duels", 1) * 100) if ps.get("duels") else None,
+                    "shots_on_target": ps.get("shots_on_target", 0),
+                    "distance_km": ps.get("distance_km"),
+                    "tackles": ps.get("tackles", 0),
+                    "interceptions": ps.get("interceptions", 0),
+                    "saves": ps.get("saves", 0),
+                    "key_passes": ps.get("key_passes", 0),
                 })
                 break
 
