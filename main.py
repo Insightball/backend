@@ -11,7 +11,7 @@ import logging
 import os
 
 from app.database import engine, Base
-from app.routes import auth, matches, players, clubs, subscription, upload, leads, admin, club_members, account, notifications, game_plans
+from app.routes import auth, matches, players, clubs, subscription, upload, leads, admin, club_members, account, notifications, game_plans, training_sessions
 from app.models import User, Club, Match
 from app.models.club_member import ClubMember
 
@@ -26,7 +26,7 @@ if sentry_dsn:
         environment=os.getenv("ENVIRONMENT", "production"),
         send_default_pii=False,  # RGPD — pas de données personnelles
     )
-    logger.info("✅ Sentry initialisé")
+    logger.info("Sentry initialisé")
 
 limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
 
@@ -43,11 +43,11 @@ def run_cleanup():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
-    print("✅ Database tables created")
+    print("Database tables created")
     scheduler = BackgroundScheduler()
     scheduler.add_job(run_cleanup, 'cron', hour=3, minute=0)
     scheduler.start()
-    print("✅ Scheduler démarré")
+    print("Scheduler démarré")
     yield
     scheduler.shutdown()
 
@@ -78,18 +78,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(auth.router,          prefix="/api/auth",          tags=["auth"])
-app.include_router(account.router,       prefix="/api/account",       tags=["account"])
-app.include_router(matches.router,       prefix="/api/matches",       tags=["matches"])
-app.include_router(players.router,       prefix="/api/players",       tags=["players"])
-app.include_router(clubs.router,         prefix="/api/club",          tags=["club"])
-app.include_router(club_members.router,  prefix="/api/club/members",  tags=["club-members"])
-app.include_router(subscription.router,  prefix="/api/subscription",  tags=["subscription"])
-app.include_router(upload.router,        prefix="/api/upload",        tags=["upload"])
-app.include_router(leads.router,         prefix="/api/leads",         tags=["leads"])
-app.include_router(notifications.router, prefix="/api/notifications", tags=["notifications"])
-app.include_router(admin.router,         prefix="/api/x-admin",       tags=["admin"])
-app.include_router(game_plans.router,    prefix="/api/game-plan",     tags=["game-plan"])
+app.include_router(auth.router,               prefix="/api/auth",               tags=["auth"])
+app.include_router(account.router,            prefix="/api/account",            tags=["account"])
+app.include_router(matches.router,            prefix="/api/matches",            tags=["matches"])
+app.include_router(players.router,            prefix="/api/players",            tags=["players"])
+app.include_router(clubs.router,              prefix="/api/club",               tags=["club"])
+app.include_router(club_members.router,       prefix="/api/club/members",       tags=["club-members"])
+app.include_router(subscription.router,       prefix="/api/subscription",       tags=["subscription"])
+app.include_router(upload.router,             prefix="/api/upload",             tags=["upload"])
+app.include_router(leads.router,              prefix="/api/leads",              tags=["leads"])
+app.include_router(notifications.router,      prefix="/api/notifications",      tags=["notifications"])
+app.include_router(admin.router,              prefix="/api/x-admin",            tags=["admin"])
+app.include_router(game_plans.router,         prefix="/api/game-plan",          tags=["game-plan"])
+app.include_router(training_sessions.router,  prefix="/api/training-sessions",  tags=["training-sessions"])
 
 
 @app.get("/", include_in_schema=False)
