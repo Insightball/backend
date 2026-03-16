@@ -14,7 +14,7 @@ from app.models.training_session import TrainingSession, Attendance
 from app.models.player import Player
 from app.models.club_member import ClubMember, InviteStatus
 
-router = APIRouter()
+router = APIRouter(redirect_slashes=False)
 
 
 # ── Helper : catégorie gérée (même pattern que matches/players) ──
