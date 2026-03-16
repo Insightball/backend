@@ -281,6 +281,85 @@ def get_player_attendance_stats(
 
 
 # ══════════════════════════════════════════════
+# CLASSEMENT BATCH (toutes les stats en 1 requête)
+# ══════════════════════════════════════════════
+
+@router.get("/ranking")
+def get_ranking(
+    category: Optional[str] = None,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user)
+):
+    """Classement assiduité — stats de tous les joueurs en une seule requête."""
+    managed = _get_managed_category(db, user)
+    cat = managed or category
+
+    # Récupérer tous les joueurs du club/coach
+    q = db.query(Player)
+    if getattr(user, "club_id", None):
+        q = q.filter(Player.club_id == user.club_id)
+    if cat:
+        q = q.filter(Player.category == cat)
+    players = q.order_by(Player.number).all()
+
+    # Récupérer toutes les présences en une seule requête
+    session_ids = db.query(TrainingSession.id).filter(
+        TrainingSession.user_id == user.id
+    )
+    if getattr(user, "club_id", None):
+        session_ids = db.query(TrainingSession.id).filter(
+            TrainingSession.club_id == user.club_id
+        )
+    if cat:
+        session_ids = session_ids.filter(TrainingSession.category == cat)
+    session_id_list = [s[0] for s in session_ids.all()]
+
+    all_att = db.query(Attendance).filter(
+        Attendance.session_id.in_(session_id_list)
+    ).all() if session_id_list else []
+
+    # Grouper par joueur
+    att_by_player = {}
+    for a in all_att:
+        att_by_player.setdefault(a.player_id, []).append(a)
+
+    results = []
+    for p in players:
+        atts = att_by_player.get(p.id, [])
+        total = len(atts)
+        present = sum(1 for a in atts if a.status == "present")
+        absent = sum(1 for a in atts if a.status == "absent")
+        excused = sum(1 for a in atts if a.status == "excused")
+        injured = sum(1 for a in atts if a.status == "injured")
+
+        # Série (on a besoin de l'ordre chronologique)
+        sorted_atts = sorted(atts, key=lambda a: a.noted_at or a.id, reverse=True)
+        streak = 0
+        for a in sorted_atts:
+            if a.status == "present":
+                streak += 1
+            else:
+                break
+
+        results.append({
+            "player_id": p.id,
+            "name": p.name,
+            "number": p.number,
+            "position": p.position,
+            "total_sessions": total,
+            "present": present,
+            "absent": absent,
+            "excused": excused,
+            "injured": injured,
+            "attendance_rate": round(present / total, 2) if total > 0 else 0.0,
+            "current_streak": streak,
+        })
+
+    results.sort(key=lambda r: r["attendance_rate"], reverse=True)
+    return results
+
+
+# ══════════════════════════════════════════════
 # VUE CALENDRIER
 # ══════════════════════════════════════════════
 
