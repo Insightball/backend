@@ -10,6 +10,8 @@ class UserSignup(BaseModel):
     password: str = Field(min_length=8)
     plan: PlanType
     club_name: Optional[str] = None
+    phone: Optional[str] = None
+    city: Optional[str] = None
 
 class UserLogin(BaseModel):
     email: EmailStr

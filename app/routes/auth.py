@@ -4,6 +4,7 @@ from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 import uuid
+import re
 import resend
 import os
 
@@ -113,7 +114,7 @@ def send_welcome_email(user_name: str, user_email: str, plan: str):
         print(f"[WARN] Email de bienvenue non envoyé : {e}")
 
 
-def _send_admin_new_signup_email(user_name: str, user_email: str, profile_role: str = None, profile_city: str = None):
+def _send_admin_new_signup_email(user_name: str, user_email: str, profile_role: str = None, profile_city: str = None, profile_phone: str = None, club_name: str = None):
     """Notification admin — nouvel inscrit en attente de validation."""
     try:
         resend.Emails.send({
@@ -143,8 +144,10 @@ def _send_admin_new_signup_email(user_name: str, user_email: str, profile_role: 
             <div style="width:40px;height:2px;background:#c9a227;margin-bottom:20px;"></div>
             <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:20px;">
               <tr><td style="font-size:11px;color:rgba(245,242,235,0.4);font-family:monospace;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);">Email</td><td align="right" style="font-size:12px;color:#f5f2eb;font-family:monospace;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);">{user_email}</td></tr>
-              <tr><td style="font-size:11px;color:rgba(245,242,235,0.4);font-family:monospace;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);">Poste</td><td align="right" style="font-size:12px;color:#f5f2eb;font-family:monospace;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);">{profile_role or '—'}</td></tr>
-              <tr><td style="font-size:11px;color:rgba(245,242,235,0.4);font-family:monospace;padding:8px 0;">Ville</td><td align="right" style="font-size:12px;color:#f5f2eb;font-family:monospace;padding:8px 0;">{profile_city or '—'}</td></tr>
+              <tr><td style="font-size:11px;color:rgba(245,242,235,0.4);font-family:monospace;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);">Téléphone</td><td align="right" style="font-size:12px;color:#f5f2eb;font-family:monospace;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);">{profile_phone or '—'}</td></tr>
+              <tr><td style="font-size:11px;color:rgba(245,242,235,0.4);font-family:monospace;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);">Club</td><td align="right" style="font-size:12px;color:#f5f2eb;font-family:monospace;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);">{club_name or '—'}</td></tr>
+              <tr><td style="font-size:11px;color:rgba(245,242,235,0.4);font-family:monospace;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);">Ville</td><td align="right" style="font-size:12px;color:#f5f2eb;font-family:monospace;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);">{profile_city or '—'}</td></tr>
+              <tr><td style="font-size:11px;color:rgba(245,242,235,0.4);font-family:monospace;padding:8px 0;">Poste</td><td align="right" style="font-size:12px;color:#f5f2eb;font-family:monospace;padding:8px 0;">{profile_role or '—'}</td></tr>
             </table>
             <table cellpadding="0" cellspacing="0">
               <tr>
@@ -250,9 +253,33 @@ async def signup(request: Request, user_data: UserSignup, db: Session = Depends(
             detail="Vérification anti-bot échouée. Réessayez."
         )
 
+    # ── Anti-doublon email (actif + soft-deleted) ──
     existing_user = db.query(User).filter(User.email == user_data.email).first()
     if existing_user:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
+        if existing_user.deleted_at:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Ce compte a été désactivé. Contacte le support à contact@insightball.com"
+            )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Un compte existe déjà avec cet email"
+        )
+
+    # ── Anti-doublon téléphone ──
+    if user_data.phone:
+        phone_digits = re.sub(r'\D', '', user_data.phone)
+        if len(phone_digits) >= 10:
+            existing_phone = db.query(User).filter(
+                User.deleted_at == None,
+                User.profile_phone != None,
+            ).all()
+            for u in existing_phone:
+                if re.sub(r'\D', '', u.profile_phone or '') == phone_digits:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Un compte existe déjà avec ce numéro de téléphone"
+                    )
 
     # ── Validation mot de passe (aligné avec reset-password) ──
     if len(user_data.password) < 8:
@@ -272,9 +299,10 @@ async def signup(request: Request, user_data: UserSignup, db: Session = Depends(
         db.flush()
     else:
         # Plan COACH — créer le solo club dès le signup
+        solo_club_name = (user_data.club_name or "").strip()
         club = Club(
             id=user_id,
-            name=f"Coach — {user_data.name}",
+            name=solo_club_name,
             quota_matches=PLAN_QUOTAS["COACH"],
         )
         db.add(club)
@@ -288,6 +316,8 @@ async def signup(request: Request, user_data: UserSignup, db: Session = Depends(
         plan=user_data.plan,
         club_id=club.id,
         is_approved=False,  # Validation manuelle requise
+        profile_phone=user_data.phone,
+        profile_city=user_data.city,
     )
     db.add(user)
     db.commit()
@@ -295,7 +325,13 @@ async def signup(request: Request, user_data: UserSignup, db: Session = Depends(
 
     # Email de bienvenue (attente validation) + notification admin
     send_welcome_email(user.name, user.email, user.plan.value)
-    _send_admin_new_signup_email(user.name, user.email)
+    _send_admin_new_signup_email(
+        user.name, user.email,
+        profile_role=None,
+        profile_city=user_data.city,
+        profile_phone=user_data.phone,
+        club_name=user_data.club_name,
+    )
 
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(data={"sub": user.email}, expires_delta=access_token_expires)
@@ -388,6 +424,7 @@ async def get_pending_users(current_user: User = Depends(get_current_user), db: 
             "plan": u.plan.value if hasattr(u.plan, 'value') else u.plan,
             "profile_role": u.profile_role,
             "profile_level": u.profile_level,
+            "profile_phone": u.profile_phone,
             "profile_city": u.profile_city,
             "profile_diploma": u.profile_diploma,
             "club_name": u.club.name if u.club else None,
