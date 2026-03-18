@@ -69,8 +69,6 @@ app.add_middleware(
     allow_origins=[
         "https://www.insightball.com",
         "https://insightball.com",
-        "https://insightball.netlify.app",
-        "http://localhost:3000",
         "http://localhost:5173",
     ],
     allow_credentials=True,
