@@ -92,7 +92,7 @@ def admin_dashboard(db: Session = Depends(get_db), _: User = Depends(require_sup
 @router.get("/users", response_model=List[UserAdminView])
 def admin_list_users(skip: int = 0, limit: int = 50, search: Optional[str] = None, plan: Optional[str] = None,
                      db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
-    query = db.query(User)
+    query = db.query(User).filter(User.deleted_at == None)
     if search:
         query = query.filter((User.email.ilike(f"%{search}%")) | (User.name.ilike(f"%{search}%")))
     if plan:

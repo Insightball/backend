@@ -351,10 +351,18 @@ async def login(request: Request, credentials: UserLogin, db: Session = Depends(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Compte supprimé
+    # Compte supprimé ou rejeté
     if user.deleted_at:
+        # Compte rejeté (pas de recovery token) → message clair
+        if not user.recovery_token:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Ce compte a été désactivé. Contacte le support à contact@insightball.com"
+            )
+        # Compte auto-supprimé avec recovery token expiré
         if user.recovery_token_expires and datetime.utcnow() > user.recovery_token_expires:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="ACCOUNT_PERMANENTLY_DELETED")
+        # Compte auto-supprimé, récupérable
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"ACCOUNT_DELETED:{user.recovery_token}")
 
     # NOTE : on ne bloque PAS les users is_approved=False au login.
