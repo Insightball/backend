@@ -32,6 +32,7 @@ class UserResponse(BaseModel):
     club_id: Optional[str] = None
     club_logo: Optional[str] = None
     managed_category: Optional[str] = None
+    is_approved: Optional[bool] = None
     stripe_subscription_id: Optional[str] = None
     trial_ends_at: Optional[str] = None
     trial_match_used: Optional[bool] = None

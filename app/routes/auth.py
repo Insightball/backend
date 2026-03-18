@@ -52,7 +52,7 @@ def _verify_recaptcha(token: str) -> bool:
 
 
 def send_welcome_email(user_name: str, user_email: str, plan: str):
-    """Email post-signup (avant CB) — template crème, accueil + 1 match offert."""
+    """Email post-signup (avant approbation) — template crème, accueil + attente validation."""
     try:
         first_name = user_name.split()[0] if user_name else "Coach"
         resend.Emails.send({
@@ -82,24 +82,14 @@ def send_welcome_email(user_name: str, user_email: str, plan: str):
             <div style="width:40px;height:2px;background:#c9a227;margin-bottom:24px;"></div>
             <p style="margin:0 0 24px 0;font-size:14px;color:rgba(26,25,22,0.6);line-height:1.75;">
               Merci d'avoir rejoint Insightball.<br/>
-              Votre compte est créé — il ne reste plus qu'à activer votre essai gratuit pour lancer votre première analyse.
+              Votre compte est en cours de validation. Vous recevrez un email de confirmation dès que votre accès sera activé.
             </p>
             <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
               <tr>
                 <td style="background:rgba(201,162,39,0.06);border:1px solid rgba(201,162,39,0.18);border-left:3px solid #c9a227;padding:18px 22px;">
-                  <p style="margin:0 0 6px 0;font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:#c9a227;font-family:'Courier New',monospace;font-weight:700;">Votre offre de bienvenue</p>
-                  <p style="margin:0;font-size:20px;color:#1a1916;font-family:'Courier New',monospace;font-weight:900;letter-spacing:.02em;">1 match analysé offert</p>
-                  <p style="margin:6px 0 0 0;font-size:12px;color:rgba(26,25,22,0.45);">Rapport tactique complet · Heatmaps · Stats · Export PDF</p>
-                </td>
-              </tr>
-            </table>
-            <table cellpadding="0" cellspacing="0">
-              <tr>
-                <td style="background:#c9a227;">
-                  <a href="https://insightball.com/dashboard"
-                     style="display:inline-block;padding:14px 28px;color:#0f0f0d;font-family:'Courier New',monospace;font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;text-decoration:none;">
-                    Activer mon essai gratuit →
-                  </a>
+                  <p style="margin:0 0 6px 0;font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:#c9a227;font-family:'Courier New',monospace;font-weight:700;">Prochaine étape</p>
+                  <p style="margin:0;font-size:16px;color:#1a1916;font-family:'Courier New',monospace;font-weight:900;letter-spacing:.02em;">Validation en cours</p>
+                  <p style="margin:6px 0 0 0;font-size:12px;color:rgba(26,25,22,0.45);">Nous vérifions votre profil. Vous serez notifié très rapidement.</p>
                 </td>
               </tr>
             </table>
@@ -108,7 +98,7 @@ def send_welcome_email(user_name: str, user_email: str, plan: str):
         <tr>
           <td style="padding:24px 0 0 0;">
             <p style="margin:0;font-size:10px;color:rgba(26,25,22,0.3);font-family:'Courier New',monospace;letter-spacing:.04em;">
-              Insightball · Football Analytics<br/>
+              Insightball · Du terrain à l'analyse.<br/>
               <a href="mailto:contact@insightball.com" style="color:#c9a227;text-decoration:none;">contact@insightball.com</a>
             </p>
           </td>
@@ -120,7 +110,133 @@ def send_welcome_email(user_name: str, user_email: str, plan: str):
 </html>"""
         })
     except Exception as e:
-        print(f"⚠️ Email de bienvenue non envoyé : {e}")
+        print(f"[WARN] Email de bienvenue non envoyé : {e}")
+
+
+def _send_admin_new_signup_email(user_name: str, user_email: str, profile_role: str = None, profile_city: str = None):
+    """Notification admin — nouvel inscrit en attente de validation."""
+    try:
+        resend.Emails.send({
+            "from": "Insightball <contact@insightball.com>",
+            "to": "contact@insightball.com",
+            "subject": f"Nouvelle inscription — {user_name}",
+            "html": f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="margin:0;padding:0;background:#0a0908;font-family:monospace;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#0a0908;padding:40px 20px;">
+    <tr><td align="center">
+      <table width="500" cellpadding="0" cellspacing="0" style="max-width:500px;width:100%;">
+        <tr>
+          <td style="padding:0 0 24px 0;">
+            <span style="font-size:18px;font-weight:900;letter-spacing:.06em;color:#f5f2eb;font-family:monospace;">
+              INSIGHT<span style="color:#c9a227;">BALL</span>
+            </span>
+          </td>
+        </tr>
+        <tr>
+          <td style="background:#0f0e0c;border:1px solid rgba(255,255,255,0.07);border-top:2px solid #c9a227;padding:28px 24px;">
+            <p style="margin:0 0 8px 0;font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:#c9a227;font-family:monospace;">Nouvelle inscription</p>
+            <h1 style="margin:0 0 16px 0;font-size:22px;color:#f5f2eb;font-family:monospace;letter-spacing:.02em;line-height:1.2;">
+              {user_name}
+            </h1>
+            <div style="width:40px;height:2px;background:#c9a227;margin-bottom:20px;"></div>
+            <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:20px;">
+              <tr><td style="font-size:11px;color:rgba(245,242,235,0.4);font-family:monospace;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);">Email</td><td align="right" style="font-size:12px;color:#f5f2eb;font-family:monospace;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);">{user_email}</td></tr>
+              <tr><td style="font-size:11px;color:rgba(245,242,235,0.4);font-family:monospace;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);">Poste</td><td align="right" style="font-size:12px;color:#f5f2eb;font-family:monospace;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);">{profile_role or '—'}</td></tr>
+              <tr><td style="font-size:11px;color:rgba(245,242,235,0.4);font-family:monospace;padding:8px 0;">Ville</td><td align="right" style="font-size:12px;color:#f5f2eb;font-family:monospace;padding:8px 0;">{profile_city or '—'}</td></tr>
+            </table>
+            <table cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="background:#c9a227;">
+                  <a href="https://insightball.com/admin"
+                     style="display:inline-block;padding:12px 24px;color:#0f0f0d;font-family:monospace;font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;text-decoration:none;">
+                    Valider dans l'admin
+                  </a>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>"""
+        })
+    except Exception as e:
+        print(f"[WARN] Email notif admin non envoyé : {e}")
+
+
+def _send_account_approved_email(user_name: str, user_email: str):
+    """Email envoyé à l'utilisateur quand son compte est approuvé."""
+    try:
+        first_name = user_name.split()[0] if user_name else "Coach"
+        resend.Emails.send({
+            "from": "Insightball <contact@insightball.com>",
+            "to": user_email,
+            "subject": "Ton compte Insightball est activé",
+            "html": f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f5f2eb;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f2eb;padding:40px 20px;">
+    <tr><td align="center">
+      <table width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;">
+        <tr>
+          <td style="padding:0 0 32px 0;">
+            <span style="font-size:22px;font-weight:900;letter-spacing:.06em;color:#1a1916;font-family:'Courier New',monospace;">
+              INSIGHT<span style="color:#c9a227;">BALL</span>
+            </span>
+          </td>
+        </tr>
+        <tr>
+          <td style="background:#ffffff;border:1px solid rgba(26,25,22,0.09);border-top:2px solid #c9a227;padding:36px 32px;">
+            <p style="margin:0 0 10px 0;font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:#c9a227;font-family:'Courier New',monospace;">Compte activé</p>
+            <h1 style="margin:0 0 20px 0;font-size:28px;color:#1a1916;font-family:'Courier New',monospace;letter-spacing:.02em;line-height:1.2;">
+              C'est parti,<br/>{first_name} !
+            </h1>
+            <div style="width:40px;height:2px;background:#c9a227;margin-bottom:24px;"></div>
+            <p style="margin:0 0 24px 0;font-size:14px;color:rgba(26,25,22,0.6);line-height:1.75;">
+              Ton compte a été validé. Tu peux maintenant activer ton essai gratuit et lancer ta première analyse de match.
+            </p>
+            <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+              <tr>
+                <td style="background:rgba(201,162,39,0.06);border:1px solid rgba(201,162,39,0.18);border-left:3px solid #c9a227;padding:18px 22px;">
+                  <p style="margin:0 0 6px 0;font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:#c9a227;font-family:'Courier New',monospace;font-weight:700;">Ton offre de bienvenue</p>
+                  <p style="margin:0;font-size:20px;color:#1a1916;font-family:'Courier New',monospace;font-weight:900;letter-spacing:.02em;">7 jours d'essai + 1 match offert</p>
+                  <p style="margin:6px 0 0 0;font-size:12px;color:rgba(26,25,22,0.45);">Rapport tactique complet · Heatmaps · Stats · Export PDF</p>
+                </td>
+              </tr>
+            </table>
+            <table cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="background:#c9a227;">
+                  <a href="https://insightball.com/dashboard"
+                     style="display:inline-block;padding:14px 28px;color:#0f0f0d;font-family:'Courier New',monospace;font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;text-decoration:none;">
+                    Accéder à mon tableau de bord
+                  </a>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:24px 0 0 0;">
+            <p style="margin:0;font-size:10px;color:rgba(26,25,22,0.3);font-family:'Courier New',monospace;letter-spacing:.04em;">
+              Insightball · Du terrain à l'analyse.<br/>
+              <a href="mailto:contact@insightball.com" style="color:#c9a227;text-decoration:none;">contact@insightball.com</a>
+            </p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>"""
+        })
+    except Exception as e:
+        print(f"[WARN] Email approbation non envoyé : {e}")
 
 
 @router.post("/signup", response_model=Token)
@@ -156,9 +272,8 @@ async def signup(request: Request, user_data: UserSignup, db: Session = Depends(
         db.flush()
     else:
         # Plan COACH — créer le solo club dès le signup
-        # Évite que _get_solo_club_id crée un club en GET plus tard
         club = Club(
-            id=user_id,  # convention : solo club id == user id
+            id=user_id,
             name=f"Coach — {user_data.name}",
             quota_matches=PLAN_QUOTAS["COACH"],
         )
@@ -172,12 +287,15 @@ async def signup(request: Request, user_data: UserSignup, db: Session = Depends(
         name=user_data.name,
         plan=user_data.plan,
         club_id=club.id,
+        is_approved=False,  # Validation manuelle requise
     )
     db.add(user)
     db.commit()
     db.refresh(user)
 
+    # Email de bienvenue (attente validation) + notification admin
     send_welcome_email(user.name, user.email, user.plan.value)
+    _send_admin_new_signup_email(user.name, user.email)
 
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(data={"sub": user.email}, expires_delta=access_token_expires)
@@ -202,10 +320,9 @@ async def login(request: Request, credentials: UserLogin, db: Session = Depends(
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="ACCOUNT_PERMANENTLY_DELETED")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"ACCOUNT_DELETED:{user.recovery_token}")
 
-    # NOTE : on ne bloque PAS les users is_active=False au login.
-    # Un user dont le trial/sub a expiré doit pouvoir se connecter
-    # pour accéder aux settings et se réabonner.
-    # La protection se fait au niveau des actions (upload, matchs) via le quota system.
+    # NOTE : on ne bloque PAS les users is_approved=False au login.
+    # Ils doivent pouvoir se connecter pour voir l'écran d'attente.
+    # La protection se fait côté frontend (ProtectedRoute).
 
     user.last_login = datetime.utcnow()
     db.commit()
@@ -240,6 +357,7 @@ async def get_current_user_info(current_user: User = Depends(get_current_user), 
         club_id=current_user.club_id,
         club_logo=current_user.club.logo_url if current_user.club else None,
         managed_category=managed_category,
+        is_approved=current_user.is_approved,
         profile_role=current_user.profile_role,
         profile_level=current_user.profile_level,
         profile_phone=current_user.profile_phone,
@@ -247,8 +365,78 @@ async def get_current_user_info(current_user: User = Depends(get_current_user), 
         profile_diploma=current_user.profile_diploma,
         trial_ends_at=current_user.trial_ends_at.isoformat() if current_user.trial_ends_at else None,
         trial_match_used=current_user.trial_match_used,
+        stripe_subscription_id=current_user.stripe_subscription_id,
     )
 
+
+# ─── Validation manuelle des comptes ───────────────────────────────────────────
+
+@router.get("/pending-users")
+async def get_pending_users(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Liste des comptes en attente de validation. Superadmin only."""
+    if not current_user.is_superadmin:
+        raise HTTPException(status_code=403, detail="Accès refusé")
+    users = db.query(User).filter(
+        User.is_approved == False,
+        User.deleted_at == None,
+    ).order_by(User.created_at.desc()).all()
+    return [
+        {
+            "id": u.id,
+            "name": u.name,
+            "email": u.email,
+            "plan": u.plan.value if hasattr(u.plan, 'value') else u.plan,
+            "profile_role": u.profile_role,
+            "profile_level": u.profile_level,
+            "profile_city": u.profile_city,
+            "profile_diploma": u.profile_diploma,
+            "club_name": u.club.name if u.club else None,
+            "created_at": u.created_at.isoformat() if u.created_at else None,
+        }
+        for u in users
+    ]
+
+
+@router.post("/approve/{user_id}")
+async def approve_user(user_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Approuve un compte + démarre le trial 7 jours. Superadmin only."""
+    if not current_user.is_superadmin:
+        raise HTTPException(status_code=403, detail="Accès refusé")
+
+    user = db.query(User).filter(User.id == user_id, User.deleted_at == None).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+
+    if user.is_approved:
+        raise HTTPException(status_code=400, detail="Ce compte est déjà approuvé")
+
+    # Approuver + démarrer le trial
+    user.is_approved = True
+    user.trial_ends_at = datetime.utcnow() + timedelta(days=7)
+    db.commit()
+
+    # Email de confirmation à l'utilisateur
+    _send_account_approved_email(user.name, user.email)
+
+    return {"success": True, "message": f"Compte de {user.name} approuvé. Trial 7 jours activé."}
+
+
+@router.post("/reject/{user_id}")
+async def reject_user(user_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Rejette un compte (soft delete). Superadmin only."""
+    if not current_user.is_superadmin:
+        raise HTTPException(status_code=403, detail="Accès refusé")
+
+    user = db.query(User).filter(User.id == user_id, User.deleted_at == None).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+
+    user.deleted_at = datetime.utcnow()
+    db.commit()
+    return {"success": True, "message": f"Compte de {user.name} rejeté."}
+
+
+# ─── Mot de passe ──────────────────────────────────────────────────────────────
 
 def send_reset_email(user_name: str, user_email: str, reset_token: str):
     try:
@@ -288,7 +476,7 @@ def send_reset_email(user_name: str, user_email: str, reset_token: str):
                 <td style="background:#c9a227;">
                   <a href="{reset_url}"
                      style="display:inline-block;padding:14px 32px;color:#0f0f0d;font-family:monospace;font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;text-decoration:none;">
-                    RÉINITIALISER MON MOT DE PASSE →
+                    RÉINITIALISER MON MOT DE PASSE
                   </a>
                 </td>
               </tr>
@@ -313,7 +501,7 @@ def send_reset_email(user_name: str, user_email: str, reset_token: str):
 </html>"""
         })
     except Exception as e:
-        print(f"⚠️ Email reset non envoyé : {e}")
+        print(f"[WARN] Email reset non envoyé : {e}")
 
 
 @router.post("/forgot-password")

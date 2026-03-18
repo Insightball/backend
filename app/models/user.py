@@ -38,6 +38,9 @@ class User(Base):
     # Superadmin
     is_superadmin = Column(Boolean, default=False)
     
+    # Validation manuelle — le compte doit être approuvé avant accès au dashboard
+    is_approved = Column(Boolean, default=False)
+    
     # Metadata
     is_active = Column(Boolean, default=True)
     last_login = Column(DateTime, nullable=True)
