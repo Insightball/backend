@@ -91,8 +91,16 @@ def admin_dashboard(db: Session = Depends(get_db), _: User = Depends(require_sup
 
 @router.get("/users", response_model=List[UserAdminView])
 def admin_list_users(skip: int = 0, limit: int = 50, search: Optional[str] = None, plan: Optional[str] = None,
+                     user_status: Optional[str] = None,
                      db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
-    query = db.query(User).filter(User.deleted_at == None)
+    query = db.query(User)
+    # Filtre statut : actifs (défaut), rejected, all
+    if user_status == "rejected":
+        query = query.filter(User.deleted_at != None)
+    elif user_status == "all":
+        pass  # pas de filtre
+    else:
+        query = query.filter(User.deleted_at == None)
     if search:
         query = query.filter((User.email.ilike(f"%{search}%")) | (User.name.ilike(f"%{search}%")))
     if plan:
