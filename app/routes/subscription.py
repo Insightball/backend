@@ -429,13 +429,16 @@ async def confirm_plan(
         )
         # Trial 7j accordé UNIQUEMENT au plan COACH
         # Le plan CLUB est vendu sur devis — pas de trial automatique
+        # On accorde le trial Stripe si le user n'a jamais eu de subscription Stripe
+        # (le trial_ends_at local de l'approbation ne compte pas)
         sub_params: dict = dict(
             customer=current_user.stripe_customer_id,
             items=[{"price": price_id}],
             default_payment_method=data.payment_method_id,
             metadata={"user_id": str(current_user.id), "plan": data.plan.upper()},
         )
-        if data.plan.upper() == "COACH" and not current_user.trial_ends_at:
+        already_had_stripe_sub = current_user.stripe_subscription_id is not None
+        if data.plan.upper() == "COACH" and not already_had_stripe_sub:
             sub_params["trial_period_days"] = 7
 
         subscription = stripe.Subscription.create(**sub_params)
