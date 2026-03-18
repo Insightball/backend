@@ -79,14 +79,15 @@ class UpdateUserPlanRequest(BaseModel):
 @router.get("/dashboard", response_model=DashboardStats)
 def admin_dashboard(db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
     now = datetime.utcnow()
+    alive = User.deleted_at == None
     return DashboardStats(
         total_users=db.query(func.count(User.id)).scalar(),
-        active_users=db.query(func.count(User.id)).filter(User.is_active == True).scalar(),
-        coach_plan_count=db.query(func.count(User.id)).filter(User.plan == "COACH").scalar(),
-        club_plan_count=db.query(func.count(User.id)).filter(User.plan.in_(["CLUB", "CLUB_PRO"])).scalar(),
-        users_last_7_days=db.query(func.count(User.id)).filter(User.created_at >= now - timedelta(days=7)).scalar(),
-        users_last_30_days=db.query(func.count(User.id)).filter(User.created_at >= now - timedelta(days=30)).scalar(),
-        paying_users=db.query(func.count(User.id)).filter(User.stripe_subscription_id != None).scalar(),
+        active_users=db.query(func.count(User.id)).filter(alive, User.is_active == True).scalar(),
+        coach_plan_count=db.query(func.count(User.id)).filter(alive, User.plan == "COACH").scalar(),
+        club_plan_count=db.query(func.count(User.id)).filter(alive, User.plan.in_(["CLUB", "CLUB_PRO"])).scalar(),
+        users_last_7_days=db.query(func.count(User.id)).filter(alive, User.created_at >= now - timedelta(days=7)).scalar(),
+        users_last_30_days=db.query(func.count(User.id)).filter(alive, User.created_at >= now - timedelta(days=30)).scalar(),
+        paying_users=db.query(func.count(User.id)).filter(alive, User.stripe_subscription_id != None).scalar(),
     )
 
 
