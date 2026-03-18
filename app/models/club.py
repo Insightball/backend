@@ -20,6 +20,7 @@ class Club(Base):
     
     # Quotas
     quota_matches = Column(Integer, default=10)
+    nb_teams = Column(String, nullable=True)
     
     # Metadata
     created_at = Column(DateTime, default=datetime.utcnow)

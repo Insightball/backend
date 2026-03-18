@@ -14,12 +14,14 @@ class ClubCreate(BaseModel):
     name: str
     primary_color: Optional[str] = '#c9a227'
     secondary_color: Optional[str] = '#0f0f0d'
+    nb_teams: Optional[str] = None
 
 class ClubUpdate(BaseModel):
     name: Optional[str] = None
     logo_url: Optional[str] = None
     primary_color: Optional[str] = None
     secondary_color: Optional[str] = None
+    nb_teams: Optional[str] = None
 
 class ClubResponse(BaseModel):
     id: str
@@ -28,6 +30,7 @@ class ClubResponse(BaseModel):
     primary_color: Optional[str]
     secondary_color: Optional[str]
     quota_matches: int
+    nb_teams: Optional[str] = None
     class Config:
         from_attributes = True
 
@@ -41,6 +44,7 @@ async def create_club(club_data: ClubCreate, current_user: User = Depends(get_cu
             club.name = club_data.name
             if club_data.primary_color: club.primary_color = club_data.primary_color
             if club_data.secondary_color: club.secondary_color = club_data.secondary_color
+            if club_data.nb_teams: club.nb_teams = club_data.nb_teams
             db.commit(); db.refresh(club)
             return club
     # Créer le club
@@ -49,6 +53,7 @@ async def create_club(club_data: ClubCreate, current_user: User = Depends(get_cu
         name=club_data.name,
         primary_color=club_data.primary_color,
         secondary_color=club_data.secondary_color,
+        nb_teams=club_data.nb_teams,
         quota_matches=10,
     )
     db.add(club)

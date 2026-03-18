@@ -183,6 +183,7 @@ class ProfileUpdate(BaseModel):
     phone: Optional[str] = None
     city: Optional[str] = None
     diploma: Optional[str] = None
+    experience: Optional[str] = None
     team_category: Optional[str] = None
     team_level: Optional[str] = None
     filming_setup: Optional[str] = None
@@ -200,6 +201,7 @@ def update_profile(
     if data.phone is not None: current_user.profile_phone = data.phone
     if data.city is not None: current_user.profile_city = data.city
     if data.diploma is not None: current_user.profile_diploma = data.diploma
+    if data.experience is not None: current_user.experience = data.experience
     if data.team_category is not None: current_user.team_category = data.team_category
     if data.team_level is not None: current_user.profile_level = data.team_level
     if data.filming_setup is not None: current_user.filming_setup = data.filming_setup
