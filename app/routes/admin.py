@@ -46,6 +46,7 @@ class UserAdminView(BaseModel):
     filming_setup: Optional[str] = None
     nb_teams: Optional[str] = None
     trial_match_used: Optional[bool] = None
+    deleted_at: Optional[datetime] = None
     class Config:
         from_attributes = True
 
@@ -121,6 +122,7 @@ def admin_list_users(skip: int = 0, limit: int = 50, search: Optional[str] = Non
         filming_setup=getattr(u, 'filming_setup', None),
         nb_teams=u.club.nb_teams if u.club and hasattr(u.club, 'nb_teams') else None,
         trial_match_used=getattr(u, 'trial_match_used', False),
+        deleted_at=u.deleted_at,
     ) for u in users]
 
 
@@ -144,6 +146,7 @@ def admin_get_user(user_id: str, db: Session = Depends(get_db), _: User = Depend
         filming_setup=getattr(u, 'filming_setup', None),
         nb_teams=u.club.nb_teams if u.club and hasattr(u.club, 'nb_teams') else None,
         trial_match_used=getattr(u, 'trial_match_used', False),
+        deleted_at=u.deleted_at,
     )
 
 
