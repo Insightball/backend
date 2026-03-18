@@ -208,6 +208,21 @@ def admin_toggle_user_active(user_id: str, db: Session = Depends(get_db), curren
     return {"id": user_id, "is_active": user.is_active}
 
 
+@router.patch("/users/{user_id}/restore")
+def admin_restore_user(user_id: str, db: Session = Depends(get_db), current_admin: User = Depends(require_superadmin)):
+    """Restaure un compte rejeté (soft-deleted)."""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+    if not user.deleted_at:
+        raise HTTPException(status_code=400, detail="Ce compte n'est pas supprimé")
+    user.deleted_at = None
+    user.is_active = True
+    user.is_approved = False  # Repasse en attente de validation
+    db.commit()
+    return {"id": user_id, "message": "Compte restauré — en attente de validation"}
+
+
 @router.delete("/users/{user_id}", status_code=204)
 def admin_delete_user(user_id: str, db: Session = Depends(get_db), current_admin: User = Depends(require_superadmin)):
     user = db.query(User).filter(User.id == user_id).first()
