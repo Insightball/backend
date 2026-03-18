@@ -42,6 +42,9 @@ class UserAdminView(BaseModel):
     profile_phone: Optional[str] = None
     profile_city: Optional[str] = None
     profile_diploma: Optional[str] = None
+    team_category: Optional[str] = None
+    filming_setup: Optional[str] = None
+    nb_teams: Optional[str] = None
     trial_match_used: Optional[bool] = None
     class Config:
         from_attributes = True
@@ -106,6 +109,9 @@ def admin_list_users(skip: int = 0, limit: int = 50, search: Optional[str] = Non
         profile_role=u.profile_role, profile_level=u.profile_level,
         profile_phone=u.profile_phone, profile_city=u.profile_city,
         profile_diploma=u.profile_diploma,
+        team_category=getattr(u, 'team_category', None),
+        filming_setup=getattr(u, 'filming_setup', None),
+        nb_teams=u.club.nb_teams if u.club and hasattr(u.club, 'nb_teams') else None,
         trial_match_used=getattr(u, 'trial_match_used', False),
     ) for u in users]
 
@@ -126,6 +132,9 @@ def admin_get_user(user_id: str, db: Session = Depends(get_db), _: User = Depend
         profile_role=u.profile_role, profile_level=u.profile_level,
         profile_phone=u.profile_phone, profile_city=u.profile_city,
         profile_diploma=u.profile_diploma,
+        team_category=getattr(u, 'team_category', None),
+        filming_setup=getattr(u, 'filming_setup', None),
+        nb_teams=u.club.nb_teams if u.club and hasattr(u.club, 'nb_teams') else None,
         trial_match_used=getattr(u, 'trial_match_used', False),
     )
 
