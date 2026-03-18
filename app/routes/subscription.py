@@ -584,7 +584,30 @@ async def get_trial_status(
         except stripe.error.StripeError:
             pass
 
-    # Pas de sub Stripe
+    # Pas de sub Stripe — vérifier le trial local (compte approuvé, trial_ends_at défini)
+    if current_user.trial_ends_at:
+        trial_end_naive = current_user.trial_ends_at
+        # Comparer en naive UTC (convention base)
+        now_naive = datetime.utcnow()
+        if trial_end_naive > now_naive:
+            delta = trial_end_naive - now_naive
+            return {
+                "access": "trial",
+                "trial_active": True,
+                "days_left": max(0, delta.days),
+                "match_used": current_user.trial_match_used or False,
+                "plan": _plan_value(current_user),
+            }
+        # Trial local expiré
+        return {
+            "access": "expired",
+            "trial_active": False,
+            "days_left": 0,
+            "match_used": current_user.trial_match_used or False,
+            "plan": _plan_value(current_user),
+        }
+
+    # Pas de sub Stripe, pas de trial
     return {
         "access": "no_trial",
         "trial_active": False,
