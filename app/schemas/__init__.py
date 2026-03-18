@@ -12,6 +12,7 @@ class UserSignup(BaseModel):
     club_name: Optional[str] = None
     phone: Optional[str] = None
     city: Optional[str] = None
+    role: Optional[str] = None
 
 class UserLogin(BaseModel):
     email: EmailStr

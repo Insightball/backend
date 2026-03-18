@@ -318,6 +318,7 @@ async def signup(request: Request, user_data: UserSignup, db: Session = Depends(
         is_approved=False,  # Validation manuelle requise
         profile_phone=user_data.phone,
         profile_city=user_data.city,
+        profile_role=user_data.role,
     )
     db.add(user)
     db.commit()
@@ -327,7 +328,7 @@ async def signup(request: Request, user_data: UserSignup, db: Session = Depends(
     send_welcome_email(user.name, user.email, user.plan.value)
     _send_admin_new_signup_email(
         user.name, user.email,
-        profile_role=None,
+        profile_role=user_data.role,
         profile_city=user_data.city,
         profile_phone=user_data.phone,
         club_name=user_data.club_name,
